@@ -17,7 +17,11 @@ EXT_ID=ophjlpahpchlmihnnnihgmmeilfjmjjc
 EXT_DIR=/app/share/line-extension
 PROFILE="${XDG_CONFIG_HOME}/chromium"
 
+# Shared with the host, so GNOME can read the images in Chromium's notifications.
 export TMPDIR="${XDG_RUNTIME_DIR}/app/${FLATPAK_ID}"
+# Chromium tags notifications with this desktop entry, so GNOME shows them
+# under Twine's name and icon instead of Chromium's.
+export CHROME_DESKTOP="${FLATPAK_ID}.desktop"
 
 # True if a Twine Chromium is already running. A leftover SingletonLock
 # after a crash doesn't count; only a live singleton socket does.

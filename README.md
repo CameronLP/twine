@@ -75,6 +75,11 @@ service workers whenever Flatpak's `app-commit` changes. LINE's data is kept.
   window to the `.desktop` file and its icon.
 - **Icon**: `data/io.github.twinechat.Twine.svg` is an original Adwaita-style
   icon, a green speech bubble with a loop of twine.
+- **Notifications**: LINE's notifications are sent as native GNOME
+  notifications. The launcher sets `CHROME_DESKTOP`, so they appear under
+  Twine's name and icon, and points `TMPDIR` at a directory GNOME can read, so
+  sender pictures show up. Notifications only arrive while Twine is running:
+  closing the window quits it.
 - **Profile**: Chromium uses a private profile in
   `~/.var/app/io.github.twinechat.Twine/config/chromium`.
 
