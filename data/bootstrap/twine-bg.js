@@ -68,6 +68,22 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
   });
 });
 
+// Keep Chromium's browser UI out of Twine. Chromium adds a "Settings" button to
+// every notification, which opens chrome://settings in a browser window, and
+// shortcuts such as Ctrl+N open a new-tab window. Close any chrome:// page as
+// soon as it appears and show the LINE window instead. (The button itself
+// can't be removed without patching Chromium.)
+function closeBrowserPage(tab) {
+  const url = tab.pendingUrl || tab.url || "";
+  if (!url.startsWith("chrome://")) return;
+  chrome.tabs.remove(tab.id).catch(() => {});
+  focusMainWindow();
+}
+chrome.tabs.onCreated.addListener(closeBrowserPage);
+chrome.tabs.onUpdated.addListener((tabId, change, tab) => {
+  if (change.url) closeBrowserPage(tab);
+});
+
 // ---------------------------------------------------------------------------
 // Appearance (Follow System / Light / Dark), applied live.
 //

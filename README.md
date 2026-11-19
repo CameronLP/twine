@@ -98,7 +98,10 @@ service workers whenever Flatpak's `app-commit` changes. LINE's data is kept.
   Colours are converted automatically, so a few elements may look slightly
   different from LINE's design.
 - **Notifications**: LINE's notifications are sent as native GNOME
-  notifications. The launcher sets `CHROME_DESKTOP`, so they appear under
+  notifications. Chromium adds a **Settings** button to each one, which can't
+  be removed without patching Chromium. It would open Chromium's settings in a
+  browser window, so the bootstrap worker (`tabs` permission) closes any
+  `chrome://` page as soon as it opens and shows the Twine window instead. The launcher sets `CHROME_DESKTOP`, so they appear under
   Twine's name and icon, and points `TMPDIR` at a directory GNOME can read, so
   sender pictures show up. Notifications only arrive while Twine is running:
   closing the window quits it.
