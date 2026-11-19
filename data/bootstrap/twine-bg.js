@@ -77,6 +77,51 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
   });
 });
 
+// Appearance submenu in the window's right-click menu. Twine's settings live
+// outside Chromium, so they are read and written through Twine's native
+// messaging helper (/app/libexec/twine-settings-host).
+const SETTINGS_HOST = "io.github.twinechat.twine";
+const APPEARANCES = { system: "Follow System", light: "Light", dark: "Dark" };
+const MENU_PREFIX = "twine-appearance-";
+
+const settings = (message) => chrome.runtime.sendNativeMessage(SETTINGS_HOST, message);
+
+async function setUpAppearanceMenu() {
+  let current = "system";
+  try {
+    current = (await settings({ command: "get" })).appearance ?? "system";
+  } catch (e) {
+    console.warn("Twine: settings helper unavailable", e);
+  }
+  await chrome.contextMenus.removeAll();
+  chrome.contextMenus.create({ id: "twine-appearance", title: "Appearance", contexts: ["all"] });
+  for (const [value, title] of Object.entries(APPEARANCES)) {
+    chrome.contextMenus.create({
+      id: MENU_PREFIX + value,
+      parentId: "twine-appearance",
+      title,
+      type: "radio",
+      checked: value === current,
+      contexts: ["all"],
+    });
+  }
+}
+
+// Chromium only reads forced dark mode at startup, so save the choice and
+// restart: closing all windows makes Chromium exit, and the launcher starts it
+// again because the helper set the restart flag.
+chrome.contextMenus.onClicked.addListener(async (info) => {
+  const id = String(info.menuItemId);
+  if (!id.startsWith(MENU_PREFIX)) return;
+  const appearance = id.slice(MENU_PREFIX.length);
+  const { appearance: current } = await settings({ command: "get" });
+  if (appearance === current) return;
+  const result = await settings({ command: "set", appearance, restart: true });
+  if (result.ok) await quitTwine();
+});
+
+setUpAppearanceMenu();
+
 // Registering these listeners makes sure Chromium starts this worker at launch.
 chrome.runtime.onStartup.addListener(() => {});
 chrome.runtime.onInstalled.addListener(() => {});

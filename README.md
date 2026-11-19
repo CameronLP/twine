@@ -77,9 +77,14 @@ service workers whenever Flatpak's `app-commit` changes. LINE's data is kept.
   icon, a green speech bubble with a loop of twine.
 - **Dark mode**: LINE's page has no dark theme of its own. Twine can turn on
   Chromium's built-in forced dark mode, which recolours the page when it is
-  drawn without changing LINE's files. Right-click Twine's icon in the dock or
-  app grid and choose **Appearance: Follow System**, **Light** or **Dark**.
-  Twine restarts to apply it, and your session is kept. The choice is stored in
+  drawn without changing LINE's files. To choose **Follow System**, **Light**
+  or **Dark**, right-click an empty area of the Twine window and open
+  **Appearance**, or right-click Twine's icon in the dock or app grid. Twine
+  restarts to apply it, and your session is kept. The in-window menu is added
+  by Twine's bootstrap worker (`contextMenus` permission), and it saves the
+  choice through a small native messaging helper,
+  `data/twine-settings-host.py`. The launcher keeps running and restarts
+  Chromium when the helper sets a restart flag. The choice is stored in
   `~/.var/app/io.github.twinechat.Twine/config/twine/appearance`. With
   Follow System (the default), the launcher reads GNOME's style through the
   settings portal at startup. Forced dark can only be switched at startup, so
@@ -167,6 +172,7 @@ When you update, also add a `<release>` entry to
 io.github.twinechat.Twine.yml      Flatpak manifest
 data/twine.sh                      Launcher (installed as /app/bin/twine)
 data/twine-prefs.py                Prepares the profile: GTK theme, service-worker reset
+data/twine-settings-host.py        Native messaging helper: reads and saves settings
 data/splash.html                   Startup window shown while the extension loads
 data/bootstrap/                    Files added to the extension: bootstrap worker,
                                    twine-activate.html focus page, title script

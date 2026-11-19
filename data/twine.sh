@@ -13,15 +13,21 @@
 # once the extension is ready. If Twine is already running, the launcher opens
 # twine-activate.html instead, which focuses the existing window.
 #
-# Appearance: "twine --twine-appearance=system|light|dark" (the app icon's
-# right-click menu) saves the choice and restarts Twine to apply it. Dark uses
-# Chromium's forced dark mode, which recolours LINE's always-light page at
-# render time. LINE's files are not changed.
+# Appearance (Follow System / Light / Dark) can be changed in two places: the
+# Appearance submenu of the window's right-click menu (via the native messaging
+# helper twine-settings-host) or the app icon's right-click menu
+# ("twine --twine-appearance=…"). Dark uses Chromium's forced dark mode, which
+# recolours LINE's always-light page at render time; LINE's files are not
+# changed. Chromium only reads that setting at startup, so a change restarts
+# Chromium: the launcher keeps running and starts Chromium again whenever it
+# exits with the restart flag file present.
 
 EXT_ID=ophjlpahpchlmihnnnihgmmeilfjmjjc
 EXT_DIR=/app/share/line-extension
 PROFILE="${XDG_CONFIG_HOME}/chromium"
 APPEARANCE_FILE="${XDG_CONFIG_HOME}/twine/appearance"
+RESTART_FILE="${XDG_CONFIG_HOME}/twine/restart"
+NATIVE_HOST=io.github.twinechat.twine
 
 # Shared with the host, so GNOME can read the images in Chromium's notifications.
 export TMPDIR="${XDG_RUNTIME_DIR}/app/${FLATPAK_ID}"
@@ -59,6 +65,21 @@ system_prefers_dark() {
         org.freedesktop.appearance color-scheme 2>/dev/null | grep -q 'uint32 1'
 }
 
+# Let the extension reach twine-settings-host. Chromium looks for native
+# messaging hosts in <user-data-dir>/NativeMessagingHosts.
+write_native_host_manifest() {
+    mkdir -p "${PROFILE}/NativeMessagingHosts"
+    cat > "${PROFILE}/NativeMessagingHosts/${NATIVE_HOST}.json" <<EOF
+{
+  "name": "${NATIVE_HOST}",
+  "description": "Twine settings helper",
+  "path": "/app/libexec/twine-settings-host",
+  "type": "stdio",
+  "allowed_origins": ["chrome-extension://${EXT_ID}/"]
+}
+EOF
+}
+
 # Handle "--twine-appearance=…" (from the desktop actions).
 case "$1" in
 --twine-appearance=*)
@@ -71,11 +92,17 @@ case "$1" in
     mkdir -p "$(dirname "${APPEARANCE_FILE}")"
     echo "${choice}" > "${APPEARANCE_FILE}"
     if is_running; then
-        # Ask the running Twine to close its windows (Chromium then exits),
-        # then start again below with the new appearance.
+        # Ask the running Twine to close its windows. Its launcher sees the
+        # restart flag and starts Chromium again with the new appearance.
+        touch "${RESTART_FILE}"
         chromium --app="chrome-extension://${EXT_ID}/twine-activate.html#quit" >/dev/null 2>&1
         i=0
         while is_running && [ "${i}" -lt 30 ]; do sleep 0.5; i=$((i + 1)); done
+        sleep 2
+        # Restarted by the other launcher (it clears the flag): nothing to do.
+        if is_running || [ ! -e "${RESTART_FILE}" ]; then
+            exit 0
+        fi
     fi
     ;;
 esac
@@ -86,18 +113,28 @@ if is_running; then
     exit
 fi
 
-appearance=$(cat "${APPEARANCE_FILE}" 2>/dev/null || echo system)
-dark=
-case "${appearance}" in
-dark) dark=1 ;;
-light) ;;
-*) system_prefers_dark && dark=1 ;;
-esac
+while :; do
+    rm -f "${RESTART_FILE}"
 
-python3 /app/libexec/twine-prefs.py "${PROFILE}"
-if [ -n "${dark}" ]; then
-    chromium --enable-features=WebContentsForceDark \
-        --app=file:///app/share/twine/splash.html "$@"
-else
-    chromium --app=file:///app/share/twine/splash.html "$@"
-fi
+    appearance=$(cat "${APPEARANCE_FILE}" 2>/dev/null || echo system)
+    dark=
+    case "${appearance}" in
+    dark) dark=1 ;;
+    light) ;;
+    *) system_prefers_dark && dark=1 ;;
+    esac
+
+    python3 /app/libexec/twine-prefs.py "${PROFILE}"
+    write_native_host_manifest
+    if [ -n "${dark}" ]; then
+        chromium --enable-features=WebContentsForceDark \
+            --app=file:///app/share/twine/splash.html "$@"
+    else
+        chromium --app=file:///app/share/twine/splash.html "$@"
+    fi
+
+    # Restart only when a settings change asked for it.
+    [ -e "${RESTART_FILE}" ] || break
+    i=0
+    while is_running && [ "${i}" -lt 30 ]; do sleep 0.5; i=$((i + 1)); done
+done

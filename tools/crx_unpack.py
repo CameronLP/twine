@@ -10,10 +10,12 @@ pinned copy.
 With --overlay, the files in that directory are copied into the extension,
 --service-worker replaces the manifest's background service worker (Twine uses
 this to wrap LINE's background.js with its bootstrap worker), and
---inject PAGE=SCRIPT adds a <script> tag for SCRIPT to the end of PAGE's <head>.
+--inject PAGE=SCRIPT adds a <script> tag for SCRIPT to the end of PAGE's <head>,
+--add-permission adds an API permission to the manifest, and --icon SIZE=FILE
+replaces the extension's icons (shown e.g. next to its context menu items).
 
 Usage: crx_unpack.py [--overlay DIR] [--service-worker FILE] [--inject PAGE=SCRIPT]
-                     <file.crx> <output-dir> [expected-extension-id]
+                     [--add-permission NAME] [--icon SIZE=FILE] <file.crx> <output-dir> [expected-extension-id]
 """
 import argparse
 import base64
@@ -72,6 +74,10 @@ def main():
     parser.add_argument("--service-worker", help="replacement background service worker")
     parser.add_argument("--inject", action="append", default=[], metavar="PAGE=SCRIPT",
                         help="add a script tag for SCRIPT to PAGE's <head>")
+    parser.add_argument("--add-permission", action="append", default=[], metavar="NAME",
+                        help="add an API permission to the manifest")
+    parser.add_argument("--icon", action="append", default=[], metavar="SIZE=FILE",
+                        help="replace the extension icons (repeat for each size)")
     args = parser.parse_args()
     crx_path, out_dir, expected = args.crx, args.out_dir, args.expected_id
 
@@ -127,6 +133,12 @@ def main():
         if not os.path.isfile(os.path.join(out_dir, args.service_worker)):
             sys.exit(f"service worker {args.service_worker} not found in extension")
         manifest["background"] = {"service_worker": args.service_worker, "type": "module"}
+    permissions = manifest.setdefault("permissions", [])
+    for permission in args.add_permission:
+        if permission not in permissions:
+            permissions.append(permission)
+    if args.icon:
+        manifest["icons"] = dict(item.split("=", 1) for item in args.icon)
     for item in args.inject:
         page, _, script = item.partition("=")
         page_path = os.path.join(out_dir, page)
