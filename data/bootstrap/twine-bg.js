@@ -60,7 +60,16 @@ async function focusMainWindow() {
   await openNewMainWindow();
 }
 
-// A second launch of Twine opens twine-activate.html, which sends this message.
+// Close every window so Chromium exits; the launcher then restarts Twine.
+async function quitTwine() {
+  const windows = await chrome.windows.getAll({ windowTypes: ["normal", "popup", "app"] });
+  await Promise.all(windows.map((w) => chrome.windows.remove(w.id).catch(() => {})));
+}
+
+// A second launch of Twine opens twine-activate.html, which sends these messages.
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg === "twine:quit") quitTwine();
+});
 chrome.runtime.onMessage.addListener((msg, sender) => {
   if (msg !== "twine:activate") return;
   focusMainWindow().finally(() => {

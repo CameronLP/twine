@@ -12,10 +12,16 @@
 # Twine's bootstrap service worker (twine-bg.js) navigates that window to LINE
 # once the extension is ready. If Twine is already running, the launcher opens
 # twine-activate.html instead, which focuses the existing window.
+#
+# Appearance: "twine --twine-appearance=system|light|dark" (the app icon's
+# right-click menu) saves the choice and restarts Twine to apply it. Dark uses
+# Chromium's forced dark mode, which recolours LINE's always-light page at
+# render time. LINE's files are not changed.
 
 EXT_ID=ophjlpahpchlmihnnnihgmmeilfjmjjc
 EXT_DIR=/app/share/line-extension
 PROFILE="${XDG_CONFIG_HOME}/chromium"
+APPEARANCE_FILE="${XDG_CONFIG_HOME}/twine/appearance"
 
 # Shared with the host, so GNOME can read the images in Chromium's notifications.
 export TMPDIR="${XDG_RUNTIME_DIR}/app/${FLATPAK_ID}"
@@ -31,23 +37,67 @@ s = socket.socket(socket.AF_UNIX)
 s.connect(sys.argv[1])' "${PROFILE}/SingletonSocket" 2>/dev/null
 }
 
+chromium() {
+    zypak-wrapper.sh /app/chromium/chrome \
+        --user-data-dir="${PROFILE}" \
+        --class="${FLATPAK_ID}" \
+        --load-extension="${EXT_DIR}" \
+        --disable-extensions-except="${EXT_DIR}" \
+        --no-first-run \
+        --no-default-browser-check \
+        --disable-component-update \
+        --password-store=basic \
+        --ozone-platform=x11 \
+        "$@"
+}
+
+# True if GNOME's style is set to dark (via the settings portal).
+system_prefers_dark() {
+    gdbus call --session --dest org.freedesktop.portal.Desktop \
+        --object-path /org/freedesktop/portal/desktop \
+        --method org.freedesktop.portal.Settings.ReadOne \
+        org.freedesktop.appearance color-scheme 2>/dev/null | grep -q 'uint32 1'
+}
+
+# Handle "--twine-appearance=…" (from the desktop actions).
+case "$1" in
+--twine-appearance=*)
+    choice="${1#--twine-appearance=}"
+    shift
+    case "${choice}" in
+    system|light|dark) ;;
+    *) echo "twine: appearance must be system, light or dark" >&2; exit 2 ;;
+    esac
+    mkdir -p "$(dirname "${APPEARANCE_FILE}")"
+    echo "${choice}" > "${APPEARANCE_FILE}"
+    if is_running; then
+        # Ask the running Twine to close its windows (Chromium then exits),
+        # then start again below with the new appearance.
+        chromium --app="chrome-extension://${EXT_ID}/twine-activate.html#quit" >/dev/null 2>&1
+        i=0
+        while is_running && [ "${i}" -lt 30 ]; do sleep 0.5; i=$((i + 1)); done
+    fi
+    ;;
+esac
+
 if is_running; then
     # Already running: hand off to the existing instance.
-    start="--app=chrome-extension://${EXT_ID}/twine-activate.html"
-else
-    python3 /app/libexec/twine-prefs.py "${PROFILE}"
-    start="--app=file:///app/share/twine/splash.html"
+    chromium --app="chrome-extension://${EXT_ID}/twine-activate.html" "$@"
+    exit
 fi
 
-exec zypak-wrapper.sh /app/chromium/chrome \
-    --user-data-dir="${PROFILE}" \
-    --class="${FLATPAK_ID}" \
-    --load-extension="${EXT_DIR}" \
-    --disable-extensions-except="${EXT_DIR}" \
-    "${start}" \
-    --no-first-run \
-    --no-default-browser-check \
-    --disable-component-update \
-    --password-store=basic \
-    --ozone-platform=x11 \
-    "$@"
+appearance=$(cat "${APPEARANCE_FILE}" 2>/dev/null || echo system)
+dark=
+case "${appearance}" in
+dark) dark=1 ;;
+light) ;;
+*) system_prefers_dark && dark=1 ;;
+esac
+
+python3 /app/libexec/twine-prefs.py "${PROFILE}"
+if [ -n "${dark}" ]; then
+    chromium --enable-features=WebContentsForceDark \
+        --app=file:///app/share/twine/splash.html "$@"
+else
+    chromium --app=file:///app/share/twine/splash.html "$@"
+fi

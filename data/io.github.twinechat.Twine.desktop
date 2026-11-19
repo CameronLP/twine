@@ -10,3 +10,16 @@ Categories=Network;InstantMessaging;Chat;
 Keywords=line;chat;messenger;twine;
 StartupNotify=true
 StartupWMClass=io.github.twinechat.Twine
+Actions=appearance-system;appearance-light;appearance-dark;
+
+[Desktop Action appearance-system]
+Name=Appearance: Follow System
+Exec=twine --twine-appearance=system
+
+[Desktop Action appearance-light]
+Name=Appearance: Light
+Exec=twine --twine-appearance=light
+
+[Desktop Action appearance-dark]
+Name=Appearance: Dark
+Exec=twine --twine-appearance=dark

@@ -75,6 +75,17 @@ service workers whenever Flatpak's `app-commit` changes. LINE's data is kept.
   window to the `.desktop` file and its icon.
 - **Icon**: `data/io.github.twinechat.Twine.svg` is an original Adwaita-style
   icon, a green speech bubble with a loop of twine.
+- **Dark mode**: LINE's page has no dark theme of its own. Twine can turn on
+  Chromium's built-in forced dark mode, which recolours the page when it is
+  drawn without changing LINE's files. Right-click Twine's icon in the dock or
+  app grid and choose **Appearance: Follow System**, **Light** or **Dark**.
+  Twine restarts to apply it, and your session is kept. The choice is stored in
+  `~/.var/app/io.github.twinechat.Twine/config/twine/appearance`. With
+  Follow System (the default), the launcher reads GNOME's style through the
+  settings portal at startup. Forced dark can only be switched at startup, so
+  if you change GNOME's style while Twine is open, it applies the next time
+  Twine starts. Colours are converted automatically, so a few elements may
+  look slightly different from LINE's design.
 - **Notifications**: LINE's notifications are sent as native GNOME
   notifications. The launcher sets `CHROME_DESKTOP`, so they appear under
   Twine's name and icon, and points `TMPDIR` at a directory GNOME can read, so
