@@ -116,6 +116,8 @@ async function applyToTab(tabId) {
     if (!attachedTabs.has(tabId)) {
       await chrome.debugger.attach({ tabId }, "1.3");
       attachedTabs.add(tabId);
+      // Needed for Page.javascriptDialogOpening (see below).
+      await chrome.debugger.sendCommand({ tabId }, "Page.enable");
     }
     await chrome.debugger.sendCommand({ tabId }, "Emulation.setAutoDarkModeOverride", {
       enabled: wantDark(),
@@ -136,6 +138,17 @@ chrome.tabs.onUpdated.addListener((tabId, change) => {
 chrome.tabs.onCreated.addListener((tab) => applyToTab(tab.id));
 chrome.tabs.onRemoved.addListener((tabId) => attachedTabs.delete(tabId));
 chrome.debugger.onDetach.addListener((source) => attachedTabs.delete(source.tabId));
+
+// LINE's page always registers a beforeunload handler that cancels closing
+// (its message is empty and nothing ever sets it), so Chromium asks "Leave
+// site?" every time the window is closed. Accept only that confirmation, so
+// closing Twine works like closing any other app. Other dialogs are left alone.
+chrome.debugger.onEvent.addListener((source, method, params) => {
+  if (method !== "Page.javascriptDialogOpening" || params.type !== "beforeunload") return;
+  chrome.debugger
+    .sendCommand(source, "Page.handleJavaScriptDialog", { accept: true })
+    .catch(() => {});
+});
 
 function setUpAppearanceMenu() {
   chrome.contextMenus.removeAll(() => {

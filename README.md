@@ -105,6 +105,11 @@ service workers whenever Flatpak's `app-commit` changes. LINE's data is kept.
   Twine's name and icon, and points `TMPDIR` at a directory GNOME can read, so
   sender pictures show up. Notifications only arrive while Twine is running:
   closing the window quits it.
+- **Closing the window**: LINE's page always asks Chromium for a "Leave
+  site?" confirmation when it is closed, even with nothing unsaved. Through
+  its debugger session the bootstrap worker accepts that one confirmation
+  (`Page.javascriptDialogOpening` of type `beforeunload`), so the window just
+  closes. Other dialogs are left alone.
 - **Profile**: Chromium uses a private profile in
   `~/.var/app/io.github.twinechat.Twine/config/chromium`.
 
