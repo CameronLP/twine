@@ -1,0 +1,6 @@
+build/
+repo/
+.flatpak-builder/
+*.flatpak
+*.crx
+__pycache__/

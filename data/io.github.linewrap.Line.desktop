@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=LINE
+GenericName=Messenger
+Comment=Chat with friends on LINE
+Exec=line %U
+Icon=io.github.linewrap.Line
+Terminal=false
+Categories=Network;InstantMessaging;Chat;
+Keywords=line;chat;messenger;
+StartupNotify=true
+StartupWMClass=io.github.linewrap.Line

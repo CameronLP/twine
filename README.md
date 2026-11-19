@@ -1,0 +1,118 @@
+# LINE for GNOME (Flatpak)
+
+An unofficial Flatpak app that runs the official
+[LINE Chrome extension](https://chromewebstore.google.com/detail/line/ophjlpahpchlmihnnnihgmmeilfjmjjc)
+in its own desktop window. It works like a normal GNOME app, with its own
+launcher entry, icon, dock grouping and desktop notifications.
+
+> This project is not affiliated with or endorsed by LY Corporation. "LINE"
+> and the LINE logo are trademarks of LY Corporation. This repository has no
+> LINE code or assets. The extension is downloaded from Google's Chrome Web
+> Store update service when you build the app.
+
+## How it works
+
+The LINE extension is a Manifest V3 extension. It uses a module service
+worker and the `downloads`, `notifications`, `system.display` and `cookies`
+APIs, plus sandboxed pages. Electron and WebKitGTK don't implement those
+APIs, so the app bundles a real Chromium:
+
+| Piece | What it is |
+| --- | --- |
+| Runtime | `org.gnome.Platform` 51 |
+| Base | `org.electronjs.Electron2.BaseApp` 26.08, which provides [zypak](https://github.com/refi64/zypak) so Chromium's sandbox works inside Flatpak |
+| Browser | An unbranded Chromium snapshot build, pinned by revision and sha256. Branded Google Chrome ignores `--load-extension` since v137, but Chromium still supports it. |
+| Extension | The `.crx` from the Web Store, pinned by sha256 and unpacked by `tools/crx_unpack.py` |
+
+`tools/crx_unpack.py` reads the developer public key from the CRX3 header and
+writes it into `manifest.json` as `"key"`. The unpacked extension therefore
+keeps its official ID (`ophjlpahpchlmihnnnihgmmeilfjmjjc`), so its
+`chrome-extension://` origin is the one LINE's servers expect. The script also
+removes `update_url` so the pinned copy never auto-updates.
+
+`data/line.sh` starts Chromium as a single app window on
+`chrome-extension://ophjlpahpchlmihnnnihgmmeilfjmjjc/index.html`. It uses a
+private profile in `~/.var/app/io.github.linewrap.Line/config/line-chromium`.
+It also passes `--class=io.github.linewrap.Line`, which sets the X11 WM_CLASS
+and the Wayland app_id, so GNOME matches the window to the `.desktop` file.
+
+## Building
+
+Requirements: `flatpak`, `flatpak-builder` and the Flathub remote.
+
+```sh
+flatpak install flathub org.gnome.Platform//51 org.gnome.Sdk//51 \
+    org.electronjs.Electron2.BaseApp//26.08
+
+flatpak-builder --force-clean --user --install --repo=repo \
+    build io.github.linewrap.Line.yml
+```
+
+Then launch **LINE** from the GNOME app grid, or run:
+
+```sh
+flatpak run io.github.linewrap.Line
+```
+
+Log in with your email and password or with the QR code. LINE may ask you to
+confirm the login on your phone the first time.
+
+### Making a bundle file
+
+```sh
+flatpak build-bundle repo line.flatpak io.github.linewrap.Line
+flatpak install --user line.flatpak
+```
+
+## Updating LINE or Chromium
+
+The extension and Chromium are both pinned by sha256. When LINE publishes a new
+extension version, the download no longer matches the pinned hash and the build
+fails. To re-pin and rebuild, run:
+
+```sh
+tools/update-sources.sh            # both
+tools/update-sources.sh extension  # just LINE
+tools/update-sources.sh chromium   # just Chromium (nearest snapshot to Stable)
+flatpak-builder --force-clean --user --install --repo=repo build io.github.linewrap.Line.yml
+```
+
+When you update, also add a `<release>` entry to
+`data/io.github.linewrap.Line.metainfo.xml`.
+
+## Permissions
+
+| Permission | Why |
+| --- | --- |
+| `--share=network` | Talking to LINE's servers |
+| `--socket=wayland`, `--socket=fallback-x11`, `--device=dri`, `--share=ipc` | Display and GPU acceleration |
+| `--socket=pulseaudio` | Notification sounds and voice messages |
+| `--talk-name=org.freedesktop.Notifications` | Desktop notifications for new messages |
+| `--filesystem=xdg-download` | Saving received files and images |
+
+## Troubleshooting
+
+- **Debugging the extension**: run
+  `flatpak run io.github.linewrap.Line --remote-debugging-port=9222`, then open
+  `chrome://inspect` in any Chromium-based browser. The launcher passes any
+  extra arguments through to Chromium.
+- **Forcing X11**: run `flatpak run io.github.linewrap.Line --ozone-platform=x11`.
+- **Resetting all data and logging out**: run
+  `rm -rf ~/.var/app/io.github.linewrap.Line`.
+- **"`--ozone-platform=wayland` is not compatible with Vulkan" in the log**: this
+  message is harmless.
+
+## Layout
+
+```
+io.github.linewrap.Line.yml        Flatpak manifest
+data/line.sh                       Launcher (installed as /app/bin/line)
+data/*.desktop, *.metainfo.xml     Desktop entry and AppStream metadata
+tools/crx_unpack.py                CRX3 to unpacked extension, keeping the store ID
+tools/update-sources.sh            Re-pins the extension and Chromium hashes
+```
+
+## License
+
+The wrapper code in this repository is under the MIT license (see `LICENSE`).
+LINE and Chromium have their own licenses.

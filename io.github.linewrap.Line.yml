@@ -1,0 +1,60 @@
+id: io.github.linewrap.Line
+runtime: org.gnome.Platform
+runtime-version: '51'
+sdk: org.gnome.Sdk
+base: org.electronjs.Electron2.BaseApp
+base-version: '26.08'
+command: line
+separate-locales: false
+
+finish-args:
+  - --share=ipc
+  - --share=network
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --socket=pulseaudio
+  - --device=dri
+  # Desktop notifications for new messages
+  - --talk-name=org.freedesktop.Notifications
+  # Saving received files and images
+  - --filesystem=xdg-download
+
+modules:
+  # Unbranded Chromium snapshot build. Unlike branded Google Chrome, it still
+  # honours --load-extension. Pinned to a revision near the 158 stable branch.
+  - name: chromium
+    buildsystem: simple
+    build-commands:
+      - rm -f chrome_sandbox chrome-wrapper
+      - mkdir -p /app/chromium
+      - cp -a . /app/chromium/
+    sources:
+      - type: archive
+        url: https://storage.googleapis.com/chromium-browser-snapshots/Linux_x64/1727463/chrome-linux.zip
+        sha256: df307e304dd6ab9288ab32459b0b5979f690ca50bcf9c7a879e818e6d1e8f441
+
+  # The LINE extension, downloaded from the Chrome Web Store update service
+  # at build time (it is not redistributed in this repository).
+  - name: line
+    buildsystem: simple
+    build-commands:
+      - python3 -I crx_unpack.py line.crx /app/share/line-extension ophjlpahpchlmihnnnihgmmeilfjmjjc
+      - install -Dm755 line.sh /app/bin/line
+      - install -Dm644 ${FLATPAK_ID}.desktop -t /app/share/applications/
+      - install -Dm644 ${FLATPAK_ID}.metainfo.xml -t /app/share/metainfo/
+      - install -Dm644 /app/share/line-extension/line_logo_128x128_on.png /app/share/icons/hicolor/128x128/apps/${FLATPAK_ID}.png
+      - install -Dm644 /app/share/line-extension/line_logo_64x64_on.png /app/share/icons/hicolor/64x64/apps/${FLATPAK_ID}.png
+      - install -Dm644 /app/share/line-extension/line_logo_48x48_on.png /app/share/icons/hicolor/48x48/apps/${FLATPAK_ID}.png
+    sources:
+      - type: file
+        url: https://clients2.google.com/service/update2/crx?response=redirect&prodversion=158.0&acceptformat=crx3&x=id%3Dophjlpahpchlmihnnnihgmmeilfjmjjc%26uc
+        dest-filename: line.crx
+        sha256: 3722ab02edb0aba49c229399ee8df5b4b5a38c60b76efadadfbae395015eb859
+      - type: file
+        path: tools/crx_unpack.py
+      - type: file
+        path: data/line.sh
+      - type: file
+        path: data/io.github.linewrap.Line.desktop
+      - type: file
+        path: data/io.github.linewrap.Line.metainfo.xml
