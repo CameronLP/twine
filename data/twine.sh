@@ -5,10 +5,11 @@
 # Web Store key, so its ID (and chrome-extension:// origin) matches the
 # official one. Chromium runs inside the Flatpak sandbox via zypak.
 #
-# The window is not opened with --app: that races extension loading and shows
-# ERR_BLOCKED_BY_CLIENT. Twine's bootstrap service worker (twine-bg.js) opens
-# the LINE window once the extension is ready. If Twine is already running,
-# the launcher opens twine-activate.html instead, which focuses the window.
+# LINE's page is not opened with --app directly: that races extension loading
+# and shows ERR_BLOCKED_BY_CLIENT. The launcher opens a local splash page, and
+# Twine's bootstrap service worker (twine-bg.js) navigates that window to LINE
+# once the extension is ready. If Twine is already running, the launcher opens
+# twine-activate.html instead, which focuses the existing window.
 
 EXT_ID=ophjlpahpchlmihnnnihgmmeilfjmjjc
 EXT_DIR=/app/share/line-extension
@@ -29,7 +30,7 @@ if is_running; then
     start="--app=chrome-extension://${EXT_ID}/twine-activate.html"
 else
     python3 /app/libexec/twine-prefs.py "${PROFILE}"
-    start="--no-startup-window"
+    start="--app=file:///app/share/twine/splash.html"
 fi
 
 exec zypak-wrapper.sh /app/chromium/chrome \

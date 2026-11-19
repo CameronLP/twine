@@ -38,22 +38,29 @@ removes `update_url` so the pinned copy never auto-updates.
 Passing `--app=chrome-extension://…/index.html` to Chromium doesn't work
 reliably. Chromium loads command-line extensions asynchronously, so the window
 can open before the extension is ready, and the page fails with
-`ERR_BLOCKED_BY_CLIENT`. Twine lets the extension open its own window instead:
+`ERR_BLOCKED_BY_CLIENT`. Twine starts in two steps instead:
 
-- `data/twine.sh` starts Chromium with `--no-startup-window`.
-- The build points the extension's manifest at Twine's bootstrap service worker
-  (`data/bootstrap/twine-bg.js`), which imports LINE's own `background.js`.
-  `twine-hook.js` captures LINE's toolbar-button handler, and the bootstrap
-  calls it once per browser session. LINE's own code then opens the window
-  and keeps track of it, as if you had clicked the extension button in Chrome.
-- If Twine is already running, the launcher detects this through Chromium's
-  singleton socket, not the lock file, which can be left behind after a crash.
-  It then opens `twine-activate.html`, which asks the bootstrap to focus the
-  LINE window and closes itself.
+1. `data/twine.sh` opens a local splash page
+   (`file:///app/share/twine/splash.html`) as an app window. That page always
+   loads, and it keeps Chromium running while the extension loads.
+2. The build points the extension's manifest at Twine's bootstrap service worker
+   (`data/bootstrap/twine-bg.js`), which imports LINE's own `background.js`.
+   When it starts, the bootstrap waits for the splash window and navigates it
+   to LINE. It stores the window ID under LINE's own `mainWindow` key.
+
+If Twine is already running, the launcher detects this through Chromium's
+singleton socket, not the lock file, which can be left behind after a crash.
+It then opens `twine-activate.html`, which asks the bootstrap to focus the LINE
+window and closes itself.
+
+Chromium only re-registers an extension's service worker when the extension
+version changes. After a Twine update, it would therefore keep running the old
+bootstrap. To avoid that, `data/twine-prefs.py` clears Chromium's cached
+service workers whenever Flatpak's `app-commit` changes. LINE's data is kept.
 
 ### Looking at home on GNOME
 
-- **Window frame**: before each start, `data/twine-prefs.py` turns on
+- **Window frame**: before each start, `data/twine-prefs.py` also turns on
   Chromium's GTK theme in the profile. Chromium then draws the title bar and
   window buttons with the system GTK theme (Adwaita) and follows the system
   light or dark style.
@@ -128,8 +135,6 @@ When you update, also add a `<release>` entry to
 - **Forcing X11**: run `flatpak run io.github.twinechat.Twine --ozone-platform=x11`.
 - **Resetting all data and logging out**: run
   `rm -rf ~/.var/app/io.github.twinechat.Twine`.
-- **A stray "blocked" window after a crash**: close it. The main LINE window
-  opens anyway.
 - **"`--ozone-platform=wayland` is not compatible with Vulkan" in the log**: this
   message is harmless.
 
@@ -138,7 +143,8 @@ When you update, also add a `<release>` entry to
 ```
 io.github.twinechat.Twine.yml      Flatpak manifest
 data/twine.sh                      Launcher (installed as /app/bin/twine)
-data/twine-prefs.py                Turns on the GTK theme in the Chromium profile
+data/twine-prefs.py                Prepares the profile: GTK theme, service-worker reset
+data/splash.html                   Startup window shown while the extension loads
 data/bootstrap/                    Files added to the extension: bootstrap worker
                                    and the twine-activate.html focus page
 data/*.desktop, *.metainfo.xml     Desktop entry and AppStream metadata
