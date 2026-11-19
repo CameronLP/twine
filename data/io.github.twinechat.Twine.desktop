@@ -1,12 +1,12 @@
 [Desktop Entry]
 Type=Application
-Name=LINE
+Name=Twine
 GenericName=Messenger
 Comment=Chat with friends on LINE
-Exec=line %U
-Icon=io.github.linewrap.Line
+Exec=twine %U
+Icon=io.github.twinechat.Twine
 Terminal=false
 Categories=Network;InstantMessaging;Chat;
-Keywords=line;chat;messenger;
+Keywords=line;chat;messenger;twine;
 StartupNotify=true
-StartupWMClass=io.github.linewrap.Line
+StartupWMClass=io.github.twinechat.Twine

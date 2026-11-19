@@ -10,7 +10,7 @@
 set -eu
 
 cd "$(dirname "$0")/.."
-MANIFEST=io.github.linewrap.Line.yml
+MANIFEST=io.github.twinechat.Twine.yml
 EXT_ID=ophjlpahpchlmihnnnihgmmeilfjmjjc
 WHAT=${1:-all}
 TMP=$(mktemp -d)

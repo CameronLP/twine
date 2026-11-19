@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>io.github.linewrap.Line</id>
+  <id>io.github.twinechat.Twine</id>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>LicenseRef-proprietary</project_license>
-  <name>LINE</name>
-  <summary>Unofficial desktop wrapper for the LINE Chrome extension</summary>
+  <name>Twine</name>
+  <summary>Chat on LINE from your desktop</summary>
   <description>
     <p>
       Runs the official LINE Chrome extension in its own window, using a
@@ -16,7 +16,7 @@
       app is built.
     </p>
   </description>
-  <launchable type="desktop-id">io.github.linewrap.Line.desktop</launchable>
+  <launchable type="desktop-id">io.github.twinechat.Twine.desktop</launchable>
   <categories>
     <category>Network</category>
     <category>InstantMessaging</category>
@@ -29,7 +29,7 @@
   <releases>
     <release version="3.7.2" date="2026-11-19">
       <description>
-        <p>Initial package of LINE extension 3.7.2 with Chromium r1727463.</p>
+        <p>Initial release, packaging LINE extension 3.7.2 with Chromium r1727463.</p>
       </description>
     </release>
   </releases>

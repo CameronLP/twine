@@ -7,13 +7,20 @@ Store ID (LINE's servers check the chrome-extension:// origin). The
 "update_url" entry is removed so Chromium never tries to auto-update the
 pinned copy.
 
-Usage: crx_unpack.py <file.crx> <output-dir> [expected-extension-id]
+With --overlay, the files in that directory are copied into the extension,
+and --service-worker replaces the manifest's background service worker
+(Twine uses this to wrap LINE's background.js with its bootstrap worker).
+
+Usage: crx_unpack.py [--overlay DIR] [--service-worker FILE]
+                     <file.crx> <output-dir> [expected-extension-id]
 """
+import argparse
 import base64
 import hashlib
 import io
 import json
 import os
+import shutil
 import sys
 import zipfile
 
@@ -56,10 +63,14 @@ def extension_id(public_key):
 
 
 def main():
-    if len(sys.argv) not in (3, 4):
-        sys.exit(__doc__)
-    crx_path, out_dir = sys.argv[1], sys.argv[2]
-    expected = sys.argv[3] if len(sys.argv) == 4 else None
+    parser = argparse.ArgumentParser(description="Unpack a CRX3 extension.")
+    parser.add_argument("crx")
+    parser.add_argument("out_dir")
+    parser.add_argument("expected_id", nargs="?")
+    parser.add_argument("--overlay", help="directory of extra files to copy in")
+    parser.add_argument("--service-worker", help="replacement background service worker")
+    args = parser.parse_args()
+    crx_path, out_dir, expected = args.crx, args.out_dir, args.expected_id
 
     data = open(crx_path, "rb").read()
     if data[:4] != b"Cr24":
@@ -106,6 +117,13 @@ def main():
         manifest = json.load(f)
     manifest.pop("update_url", None)
     manifest["key"] = base64.b64encode(key).decode()
+
+    if args.overlay:
+        shutil.copytree(args.overlay, out_dir, dirs_exist_ok=True)
+    if args.service_worker:
+        if not os.path.isfile(os.path.join(out_dir, args.service_worker)):
+            sys.exit(f"service worker {args.service_worker} not found in extension")
+        manifest["background"] = {"service_worker": args.service_worker, "type": "module"}
     with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2, ensure_ascii=False)
 

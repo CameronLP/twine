@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="face" x1="0" y1="14" x2="0" y2="100" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#57e389"/>
+      <stop offset="1" stop-color="#2ec27e"/>
+    </linearGradient>
+    <linearGradient id="side" x1="0" y1="80" x2="0" y2="118" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#26a269"/>
+      <stop offset="1" stop-color="#1e8a57"/>
+    </linearGradient>
+    <!-- Speech bubble with a tail at the bottom left -->
+    <path id="bubble" d="M42 14h44c16.6 0 30 13.4 30 30v20c0 16.6-13.4 30-30 30H56L32.5 110.5c-2.6 1.9-6.1-.4-5.4-3.5L30 92.6C19.4 87.9 12 77.3 12 64V44c0-16.6 13.4-30 30-30z"/>
+    <!-- The twine strand: comes in from the left, loops once, leaves right -->
+    <path id="strand" d="M24 66c12 0 20 6 34 6 20 0 31-13 25-25-6-12-26-8-25 8 1 18 26 21 47 7" fill="none" stroke-linejoin="round"/>
+  </defs>
+
+  <!-- 3D base -->
+  <use href="#bubble" fill="url(#side)" transform="translate(0 6)"/>
+  <!-- Face -->
+  <use href="#bubble" fill="url(#face)"/>
+  <!-- Soft top highlight -->
+  <path d="M42 15h44c16 0 29 12.5 29.9 28.5C115 28 102 16.5 86 16.5H42C26 16.5 13 28 12.1 43.5 13 27.5 26 15 42 15z" fill="#fff" opacity=".35"/>
+
+  <!-- Twine strand with a soft shadow -->
+  <use href="#strand" stroke="#1e8a57" stroke-width="11" stroke-linecap="round" opacity=".35" transform="translate(0 2.5)"/>
+  <use href="#strand" stroke="#f6f5f4" stroke-width="10" stroke-linecap="round"/>
+</svg>

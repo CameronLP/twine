@@ -1,9 +1,12 @@
-# LINE for GNOME (Flatpak)
+# Twine
 
-An unofficial Flatpak app that runs the official
+*Chat on LINE from your GNOME desktop.*
+
+Twine is an unofficial Flatpak app that runs the official
 [LINE Chrome extension](https://chromewebstore.google.com/detail/line/ophjlpahpchlmihnnnihgmmeilfjmjjc)
 in its own desktop window. It works like a normal GNOME app, with its own
-launcher entry, icon, dock grouping and desktop notifications.
+launcher entry, icon, dock grouping, Adwaita-styled window controls and
+desktop notifications.
 
 > This project is not affiliated with or endorsed by LY Corporation. "LINE"
 > and the LINE logo are trademarks of LY Corporation. This repository has no
@@ -30,11 +33,37 @@ keeps its official ID (`ophjlpahpchlmihnnnihgmmeilfjmjjc`), so its
 `chrome-extension://` origin is the one LINE's servers expect. The script also
 removes `update_url` so the pinned copy never auto-updates.
 
-`data/line.sh` starts Chromium as a single app window on
-`chrome-extension://ophjlpahpchlmihnnnihgmmeilfjmjjc/index.html`. It uses a
-private profile in `~/.var/app/io.github.linewrap.Line/config/line-chromium`.
-It also passes `--class=io.github.linewrap.Line`, which sets the X11 WM_CLASS
-and the Wayland app_id, so GNOME matches the window to the `.desktop` file.
+### Opening the window
+
+Passing `--app=chrome-extension://…/index.html` to Chromium doesn't work
+reliably. Chromium loads command-line extensions asynchronously, so the window
+can open before the extension is ready, and the page fails with
+`ERR_BLOCKED_BY_CLIENT`. Twine lets the extension open its own window instead:
+
+- `data/twine.sh` starts Chromium with `--no-startup-window`.
+- The build points the extension's manifest at Twine's bootstrap service worker
+  (`data/bootstrap/twine-bg.js`), which imports LINE's own `background.js`.
+  `twine-hook.js` captures LINE's toolbar-button handler, and the bootstrap
+  calls it once per browser session. LINE's own code then opens the window
+  and keeps track of it, as if you had clicked the extension button in Chrome.
+- If Twine is already running, the launcher detects this through Chromium's
+  singleton socket, not the lock file, which can be left behind after a crash.
+  It then opens `twine-activate.html`, which asks the bootstrap to focus the
+  LINE window and closes itself.
+
+### Looking at home on GNOME
+
+- **Window frame**: before each start, `data/twine-prefs.py` turns on
+  Chromium's GTK theme in the profile. Chromium then draws the title bar and
+  window buttons with the system GTK theme (Adwaita) and follows the system
+  light or dark style.
+- **Dock and icon**: the launcher passes `--class=io.github.twinechat.Twine`,
+  which sets the X11 WM_CLASS and the Wayland app_id. GNOME then matches the
+  window to the `.desktop` file and its icon.
+- **Icon**: `data/io.github.twinechat.Twine.svg` is an original Adwaita-style
+  icon, a green speech bubble with a loop of twine.
+- **Profile**: Chromium uses a private profile in
+  `~/.var/app/io.github.twinechat.Twine/config/chromium`.
 
 ## Building
 
@@ -45,13 +74,13 @@ flatpak install flathub org.gnome.Platform//51 org.gnome.Sdk//51 \
     org.electronjs.Electron2.BaseApp//26.08
 
 flatpak-builder --force-clean --user --install --repo=repo \
-    build io.github.linewrap.Line.yml
+    build io.github.twinechat.Twine.yml
 ```
 
-Then launch **LINE** from the GNOME app grid, or run:
+Then launch **Twine** from the GNOME app grid, or run:
 
 ```sh
-flatpak run io.github.linewrap.Line
+flatpak run io.github.twinechat.Twine
 ```
 
 Log in with your email and password or with the QR code. LINE may ask you to
@@ -60,8 +89,8 @@ confirm the login on your phone the first time.
 ### Making a bundle file
 
 ```sh
-flatpak build-bundle repo line.flatpak io.github.linewrap.Line
-flatpak install --user line.flatpak
+flatpak build-bundle repo twine.flatpak io.github.twinechat.Twine
+flatpak install --user twine.flatpak
 ```
 
 ## Updating LINE or Chromium
@@ -74,11 +103,11 @@ fails. To re-pin and rebuild, run:
 tools/update-sources.sh            # both
 tools/update-sources.sh extension  # just LINE
 tools/update-sources.sh chromium   # just Chromium (nearest snapshot to Stable)
-flatpak-builder --force-clean --user --install --repo=repo build io.github.linewrap.Line.yml
+flatpak-builder --force-clean --user --install --repo=repo build io.github.twinechat.Twine.yml
 ```
 
 When you update, also add a `<release>` entry to
-`data/io.github.linewrap.Line.metainfo.xml`.
+`data/io.github.twinechat.Twine.metainfo.xml`.
 
 ## Permissions
 
@@ -93,21 +122,27 @@ When you update, also add a `<release>` entry to
 ## Troubleshooting
 
 - **Debugging the extension**: run
-  `flatpak run io.github.linewrap.Line --remote-debugging-port=9222`, then open
+  `flatpak run io.github.twinechat.Twine --remote-debugging-port=9222`, then open
   `chrome://inspect` in any Chromium-based browser. The launcher passes any
   extra arguments through to Chromium.
-- **Forcing X11**: run `flatpak run io.github.linewrap.Line --ozone-platform=x11`.
+- **Forcing X11**: run `flatpak run io.github.twinechat.Twine --ozone-platform=x11`.
 - **Resetting all data and logging out**: run
-  `rm -rf ~/.var/app/io.github.linewrap.Line`.
+  `rm -rf ~/.var/app/io.github.twinechat.Twine`.
+- **A stray "blocked" window after a crash**: close it. The main LINE window
+  opens anyway.
 - **"`--ozone-platform=wayland` is not compatible with Vulkan" in the log**: this
   message is harmless.
 
 ## Layout
 
 ```
-io.github.linewrap.Line.yml        Flatpak manifest
-data/line.sh                       Launcher (installed as /app/bin/line)
+io.github.twinechat.Twine.yml      Flatpak manifest
+data/twine.sh                      Launcher (installed as /app/bin/twine)
+data/twine-prefs.py                Turns on the GTK theme in the Chromium profile
+data/bootstrap/                    Files added to the extension: bootstrap worker
+                                   and the twine-activate.html focus page
 data/*.desktop, *.metainfo.xml     Desktop entry and AppStream metadata
+data/*.svg                         App icon
 tools/crx_unpack.py                CRX3 to unpacked extension, keeping the store ID
 tools/update-sources.sh            Re-pins the extension and Chromium hashes
 ```

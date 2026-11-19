@@ -1,0 +1,46 @@
+#!/bin/sh
+# Twine: launch the LINE Chrome extension in its own Chromium window.
+#
+# The extension is loaded unpacked from /app/share/line-extension with its
+# Web Store key, so its ID (and chrome-extension:// origin) matches the
+# official one. Chromium runs inside the Flatpak sandbox via zypak.
+#
+# The window is not opened with --app: that races extension loading and shows
+# ERR_BLOCKED_BY_CLIENT. Twine's bootstrap service worker (twine-bg.js) opens
+# the LINE window once the extension is ready. If Twine is already running,
+# the launcher opens twine-activate.html instead, which focuses the window.
+
+EXT_ID=ophjlpahpchlmihnnnihgmmeilfjmjjc
+EXT_DIR=/app/share/line-extension
+PROFILE="${XDG_CONFIG_HOME}/chromium"
+
+export TMPDIR="${XDG_RUNTIME_DIR}/app/${FLATPAK_ID}"
+
+# True if a Twine Chromium is already running. A leftover SingletonLock
+# after a crash doesn't count; only a live singleton socket does.
+is_running() {
+    python3 -I -c 'import socket, sys
+s = socket.socket(socket.AF_UNIX)
+s.connect(sys.argv[1])' "${PROFILE}/SingletonSocket" 2>/dev/null
+}
+
+if is_running; then
+    # Already running: hand off to the existing instance.
+    start="--app=chrome-extension://${EXT_ID}/twine-activate.html"
+else
+    python3 /app/libexec/twine-prefs.py "${PROFILE}"
+    start="--no-startup-window"
+fi
+
+exec zypak-wrapper.sh /app/chromium/chrome \
+    --user-data-dir="${PROFILE}" \
+    --class="${FLATPAK_ID}" \
+    --load-extension="${EXT_DIR}" \
+    --disable-extensions-except="${EXT_DIR}" \
+    "${start}" \
+    --no-first-run \
+    --no-default-browser-check \
+    --disable-component-update \
+    --password-store=basic \
+    --ozone-platform-hint=auto \
+    "$@"
