@@ -39,7 +39,7 @@ if [ "$WHAT" = all ] || [ "$WHAT" = chromium ]; then
     found=
     for r in $(seq "$rev" -1 $((rev - 200))); do
         url="https://storage.googleapis.com/chromium-browser-snapshots/Linux_x64/$r/chrome-linux.zip"
-        if curl -fsSI -o /dev/null "$url"; then found=$r; break; fi
+        if curl -fsI -o /dev/null "$url"; then found=$r; break; fi
     done
     [ -n "$found" ] || { echo "no snapshot found near r$rev" >&2; exit 1; }
     echo "Using Chromium snapshot r$found"
