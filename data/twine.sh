@@ -16,17 +16,16 @@
 # Appearance (Follow System / Light / Dark) can be changed in two places: the
 # Appearance submenu of the window's right-click menu (via the native messaging
 # helper twine-settings-host) or the app icon's right-click menu
-# ("twine --twine-appearance=…"). Dark uses Chromium's forced dark mode, which
-# recolours LINE's always-light page at render time; LINE's files are not
-# changed. Chromium only reads that setting at startup, so a change restarts
-# Chromium: the launcher keeps running and starts Chromium again whenever it
-# exits with the restart flag file present.
+# ("twine --twine-appearance=…", which just saves the choice). Dark uses
+# Chromium's auto dark mode, which recolours LINE's always-light page at render
+# time; LINE's files are not changed. The bootstrap worker switches it live
+# through chrome.debugger (see twine-bg.js), and twine-settings-host tells it
+# about setting and GNOME style changes, so nothing needs a restart.
 
 EXT_ID=ophjlpahpchlmihnnnihgmmeilfjmjjc
 EXT_DIR=/app/share/line-extension
 PROFILE="${XDG_CONFIG_HOME}/chromium"
 APPEARANCE_FILE="${XDG_CONFIG_HOME}/twine/appearance"
-RESTART_FILE="${XDG_CONFIG_HOME}/twine/restart"
 NATIVE_HOST=io.github.twinechat.twine
 
 # Shared with the host, so GNOME can read the images in Chromium's notifications.
@@ -54,15 +53,8 @@ chromium() {
         --disable-component-update \
         --password-store=basic \
         --ozone-platform=x11 \
+        --silent-debugger-extension-api \
         "$@"
-}
-
-# True if GNOME's style is set to dark (via the settings portal).
-system_prefers_dark() {
-    gdbus call --session --dest org.freedesktop.portal.Desktop \
-        --object-path /org/freedesktop/portal/desktop \
-        --method org.freedesktop.portal.Settings.ReadOne \
-        org.freedesktop.appearance color-scheme 2>/dev/null | grep -q 'uint32 1'
 }
 
 # Let the extension reach twine-settings-host. Chromium looks for native
@@ -91,19 +83,8 @@ case "$1" in
     esac
     mkdir -p "$(dirname "${APPEARANCE_FILE}")"
     echo "${choice}" > "${APPEARANCE_FILE}"
-    if is_running; then
-        # Ask the running Twine to close its windows. Its launcher sees the
-        # restart flag and starts Chromium again with the new appearance.
-        touch "${RESTART_FILE}"
-        chromium --app="chrome-extension://${EXT_ID}/twine-activate.html#quit" >/dev/null 2>&1
-        i=0
-        while is_running && [ "${i}" -lt 30 ]; do sleep 0.5; i=$((i + 1)); done
-        sleep 2
-        # Restarted by the other launcher (it clears the flag): nothing to do.
-        if is_running || [ ! -e "${RESTART_FILE}" ]; then
-            exit 0
-        fi
-    fi
+    # A running Twine picks up the change live; otherwise start it below.
+    is_running && exit 0
     ;;
 esac
 
@@ -113,28 +94,6 @@ if is_running; then
     exit
 fi
 
-while :; do
-    rm -f "${RESTART_FILE}"
-
-    appearance=$(cat "${APPEARANCE_FILE}" 2>/dev/null || echo system)
-    dark=
-    case "${appearance}" in
-    dark) dark=1 ;;
-    light) ;;
-    *) system_prefers_dark && dark=1 ;;
-    esac
-
-    python3 /app/libexec/twine-prefs.py "${PROFILE}"
-    write_native_host_manifest
-    if [ -n "${dark}" ]; then
-        chromium --enable-features=WebContentsForceDark \
-            --app=file:///app/share/twine/splash.html "$@"
-    else
-        chromium --app=file:///app/share/twine/splash.html "$@"
-    fi
-
-    # Restart only when a settings change asked for it.
-    [ -e "${RESTART_FILE}" ] || break
-    i=0
-    while is_running && [ "${i}" -lt 30 ]; do sleep 0.5; i=$((i + 1)); done
-done
+python3 /app/libexec/twine-prefs.py "${PROFILE}"
+write_native_host_manifest
+chromium --app=file:///app/share/twine/splash.html "$@"

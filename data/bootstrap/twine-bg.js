@@ -60,16 +60,7 @@ async function focusMainWindow() {
   await openNewMainWindow();
 }
 
-// Close every window so Chromium exits; the launcher then restarts Twine.
-async function quitTwine() {
-  const windows = await chrome.windows.getAll({ windowTypes: ["normal", "popup", "app"] });
-  await Promise.all(windows.map((w) => chrome.windows.remove(w.id).catch(() => {})));
-}
-
-// A second launch of Twine opens twine-activate.html, which sends these messages.
-chrome.runtime.onMessage.addListener((msg) => {
-  if (msg === "twine:quit") quitTwine();
-});
+// A second launch of Twine opens twine-activate.html, which sends this message.
 chrome.runtime.onMessage.addListener((msg, sender) => {
   if (msg !== "twine:activate") return;
   focusMainWindow().finally(() => {
@@ -77,50 +68,103 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
   });
 });
 
-// Appearance submenu in the window's right-click menu. Twine's settings live
-// outside Chromium, so they are read and written through Twine's native
-// messaging helper (/app/libexec/twine-settings-host).
+// ---------------------------------------------------------------------------
+// Appearance (Follow System / Light / Dark), applied live.
+//
+// LINE's page has no dark theme, so dark mode uses Chromium's auto dark mode.
+// The DevTools command Emulation.setAutoDarkModeOverride switches it on or off
+// for a page instantly. The worker sends it through chrome.debugger, so no
+// debugging port is opened (the launcher passes --silent-debugger-extension-api
+// to hide Chromium's "started debugging" bar).
+//
+// Twine's settings live outside Chromium. A long-lived connection to Twine's
+// native messaging helper (/app/libexec/twine-settings-host) reports the
+// saved choice and GNOME's light/dark style, and sends updates whenever either
+// changes. The open connection also keeps this worker alive, so the debugger
+// sessions (and with them the dark mode) stay attached.
+// ---------------------------------------------------------------------------
 const SETTINGS_HOST = "io.github.twinechat.twine";
 const APPEARANCES = { system: "Follow System", light: "Light", dark: "Dark" };
 const MENU_PREFIX = "twine-appearance-";
 
-const settings = (message) => chrome.runtime.sendNativeMessage(SETTINGS_HOST, message);
+let settingsPort = null;
+let appearance = { appearance: "system", systemDark: false };
+const attachedTabs = new Set();
 
-async function setUpAppearanceMenu() {
-  let current = "system";
+const wantDark = () =>
+  appearance.appearance === "dark" ||
+  (appearance.appearance === "system" && appearance.systemDark);
+
+async function applyToTab(tabId) {
   try {
-    current = (await settings({ command: "get" })).appearance ?? "system";
-  } catch (e) {
-    console.warn("Twine: settings helper unavailable", e);
-  }
-  await chrome.contextMenus.removeAll();
-  chrome.contextMenus.create({ id: "twine-appearance", title: "Appearance", contexts: ["all"] });
-  for (const [value, title] of Object.entries(APPEARANCES)) {
-    chrome.contextMenus.create({
-      id: MENU_PREFIX + value,
-      parentId: "twine-appearance",
-      title,
-      type: "radio",
-      checked: value === current,
-      contexts: ["all"],
+    if (!attachedTabs.has(tabId)) {
+      await chrome.debugger.attach({ tabId }, "1.3");
+      attachedTabs.add(tabId);
+    }
+    await chrome.debugger.sendCommand({ tabId }, "Emulation.setAutoDarkModeOverride", {
+      enabled: wantDark(),
     });
+  } catch {
+    // Pages the debugger can't attach to (such as the file:// splash page).
   }
 }
 
-// Chromium only reads forced dark mode at startup, so save the choice and
-// restart: closing all windows makes Chromium exit, and the launcher starts it
-// again because the helper set the restart flag.
-chrome.contextMenus.onClicked.addListener(async (info) => {
+async function applyToAllTabs() {
+  const tabs = await chrome.tabs.query({});
+  await Promise.all(tabs.map((tab) => applyToTab(tab.id)));
+}
+
+chrome.tabs.onUpdated.addListener((tabId, change) => {
+  if (change.status === "loading" || change.url) applyToTab(tabId);
+});
+chrome.tabs.onCreated.addListener((tab) => applyToTab(tab.id));
+chrome.tabs.onRemoved.addListener((tabId) => attachedTabs.delete(tabId));
+chrome.debugger.onDetach.addListener((source) => attachedTabs.delete(source.tabId));
+
+function setUpAppearanceMenu() {
+  chrome.contextMenus.removeAll(() => {
+    chrome.contextMenus.create({ id: "twine-appearance", title: "Appearance", contexts: ["all"] });
+    for (const [value, title] of Object.entries(APPEARANCES)) {
+      chrome.contextMenus.create({
+        id: MENU_PREFIX + value,
+        parentId: "twine-appearance",
+        title,
+        type: "radio",
+        checked: value === appearance.appearance,
+        contexts: ["all"],
+      });
+    }
+  });
+}
+
+function connectSettings() {
+  settingsPort = chrome.runtime.connectNative(SETTINGS_HOST);
+  settingsPort.onMessage.addListener((msg) => {
+    if (!msg || !(msg.appearance in APPEARANCES)) return;
+    const menuChanged = msg.appearance !== appearance.appearance;
+    appearance = msg;
+    if (menuChanged) {
+      chrome.contextMenus.update(MENU_PREFIX + msg.appearance, { checked: true }, () => void chrome.runtime.lastError);
+    }
+    applyToAllTabs();
+  });
+  settingsPort.onDisconnect.addListener(() => {
+    console.warn("Twine: settings helper disconnected", chrome.runtime.lastError?.message);
+    settingsPort = null;
+    setTimeout(connectSettings, 2000);
+  });
+}
+
+// Saving goes through the helper, which writes the setting and then reports
+// the new state back, which applies it.
+chrome.contextMenus.onClicked.addListener((info) => {
   const id = String(info.menuItemId);
-  if (!id.startsWith(MENU_PREFIX)) return;
-  const appearance = id.slice(MENU_PREFIX.length);
-  const { appearance: current } = await settings({ command: "get" });
-  if (appearance === current) return;
-  const result = await settings({ command: "set", appearance, restart: true });
-  if (result.ok) await quitTwine();
+  if (!id.startsWith(MENU_PREFIX) || !settingsPort) return;
+  settingsPort.postMessage({ command: "set", appearance: id.slice(MENU_PREFIX.length) });
 });
 
 setUpAppearanceMenu();
+connectSettings();
 
 // Registering these listeners makes sure Chromium starts this worker at launch.
 chrome.runtime.onStartup.addListener(() => {});

@@ -75,22 +75,28 @@ service workers whenever Flatpak's `app-commit` changes. LINE's data is kept.
   window to the `.desktop` file and its icon.
 - **Icon**: `data/io.github.twinechat.Twine.svg` is an original Adwaita-style
   icon, a green speech bubble with a loop of twine.
-- **Dark mode**: LINE's page has no dark theme of its own. Twine can turn on
-  Chromium's built-in forced dark mode, which recolours the page when it is
+- **Dark mode**: LINE's page has no dark theme of its own, so Twine uses
+  Chromium's built-in auto dark mode, which recolours the page when it is
   drawn without changing LINE's files. To choose **Follow System**, **Light**
-  or **Dark**, right-click an empty area of the Twine window and open
-  **Appearance**, or right-click Twine's icon in the dock or app grid. Twine
-  restarts to apply it, and your session is kept. The in-window menu is added
-  by Twine's bootstrap worker (`contextMenus` permission), and it saves the
-  choice through a small native messaging helper,
-  `data/twine-settings-host.py`. The launcher keeps running and restarts
-  Chromium when the helper sets a restart flag. The choice is stored in
-  `~/.var/app/io.github.twinechat.Twine/config/twine/appearance`. With
-  Follow System (the default), the launcher reads GNOME's style through the
-  settings portal at startup. Forced dark can only be switched at startup, so
-  if you change GNOME's style while Twine is open, it applies the next time
-  Twine starts. Colours are converted automatically, so a few elements may
-  look slightly different from LINE's design.
+  or **Dark**, right-click an empty area of the Twine window (for example the
+  left sidebar) and open **Appearance**, or right-click Twine's icon in the
+  dock or app grid. Changes apply instantly, and with Follow System (the
+  default) Twine switches as soon as GNOME's style changes.
+
+  How it works: the bootstrap worker turns auto dark mode on or off for each
+  page with the DevTools command `Emulation.setAutoDarkModeOverride`, sent
+  through the `chrome.debugger` extension API. No debugging port is opened,
+  and `--silent-debugger-extension-api` hides Chromium's "started debugging"
+  bar. The worker keeps a native messaging connection open to
+  `data/twine-settings-host.py`, which reports the saved choice
+  (`~/.var/app/io.github.twinechat.Twine/config/twine/appearance`) and GNOME's
+  style (watched through the settings portal), and saves choices made in the
+  menu. The open connection also keeps the worker, and so the dark mode,
+  alive. The build adds the `contextMenus`, `nativeMessaging` and `debugger`
+  permissions to the extension. `debugger` belongs to the whole extension,
+  but it only reaches pages inside Twine's own Chromium, which is LINE itself.
+  Colours are converted automatically, so a few elements may look slightly
+  different from LINE's design.
 - **Notifications**: LINE's notifications are sent as native GNOME
   notifications. The launcher sets `CHROME_DESKTOP`, so they appear under
   Twine's name and icon, and points `TMPDIR` at a directory GNOME can read, so
@@ -172,7 +178,7 @@ When you update, also add a `<release>` entry to
 io.github.twinechat.Twine.yml      Flatpak manifest
 data/twine.sh                      Launcher (installed as /app/bin/twine)
 data/twine-prefs.py                Prepares the profile: GTK theme, service-worker reset
-data/twine-settings-host.py        Native messaging helper: reads and saves settings
+data/twine-settings-host.py        Native messaging helper: settings and GNOME style
 data/splash.html                   Startup window shown while the extension loads
 data/bootstrap/                    Files added to the extension: bootstrap worker,
                                    twine-activate.html focus page, title script
