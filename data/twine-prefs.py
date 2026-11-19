@@ -1,10 +1,9 @@
 #!/usr/bin/python3
 """Prepare Twine's Chromium profile before Chromium starts.
 
-Turns on the GTK theme, so Chromium draws its title bar and window buttons
-with the system GTK theme (Adwaita on GNOME) instead of its own style. It
-also keeps Chromium's client-side frame, because GNOME's compositor has no
-server-side decorations.
+Turns on "use system title bar", so GNOME's window manager draws the native
+Adwaita title bar and buttons around Twine's X11 window. It also turns on the
+GTK theme, for the parts Chromium still draws itself.
 
 It also clears Chromium's cached service workers whenever the installed Twine
 build changes. Chromium only re-registers an extension's service worker when
@@ -23,7 +22,7 @@ import sys
 SETTINGS = {
     ("extensions", "theme", "system_theme"): 1,  # ui::SystemTheme::kGtk
     ("extensions", "theme", "use_system"): True,  # older Chromium versions
-    ("browser", "custom_chrome_frame"): True,
+    ("browser", "custom_chrome_frame"): False,  # use the system title bar
 }
 
 

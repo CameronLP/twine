@@ -3,7 +3,9 @@
 #
 # The extension is loaded unpacked from /app/share/line-extension with its
 # Web Store key, so its ID (and chrome-extension:// origin) matches the
-# official one. Chromium runs inside the Flatpak sandbox via zypak.
+# official one. Chromium runs inside the Flatpak sandbox via zypak. It uses
+# X11 (XWayland) with the system title bar, so GNOME's window manager draws a
+# native Adwaita title bar. On Wayland, Chromium would have to draw its own.
 #
 # LINE's page is not opened with --app directly: that races extension loading
 # and shows ERR_BLOCKED_BY_CLIENT. The launcher opens a local splash page, and
@@ -43,5 +45,5 @@ exec zypak-wrapper.sh /app/chromium/chrome \
     --no-default-browser-check \
     --disable-component-update \
     --password-store=basic \
-    --ozone-platform-hint=auto \
+    --ozone-platform=x11 \
     "$@"

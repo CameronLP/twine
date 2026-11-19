@@ -10,8 +10,9 @@ separate-locales: false
 finish-args:
   - --share=ipc
   - --share=network
-  - --socket=wayland
-  - --socket=fallback-x11
+  # X11 (XWayland) so GNOME's window manager draws the native title bar.
+  # Chromium can only draw its own frame on Wayland.
+  - --socket=x11
   - --socket=pulseaudio
   - --device=dri
   # Desktop notifications for new messages
@@ -38,7 +39,7 @@ modules:
   - name: line
     buildsystem: simple
     build-commands:
-      - python3 -I crx_unpack.py --overlay bootstrap --service-worker twine-bg.js line.crx /app/share/line-extension ophjlpahpchlmihnnnihgmmeilfjmjjc
+      - python3 -I crx_unpack.py --overlay bootstrap --service-worker twine-bg.js --inject index.html=twine-title.js line.crx /app/share/line-extension ophjlpahpchlmihnnnihgmmeilfjmjjc
       - install -Dm755 twine.sh /app/bin/twine
       - install -Dm755 twine-prefs.py /app/libexec/twine-prefs.py
       - install -Dm644 ${FLATPAK_ID}.desktop -t /app/share/applications/

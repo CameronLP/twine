@@ -8,10 +8,11 @@ Store ID (LINE's servers check the chrome-extension:// origin). The
 pinned copy.
 
 With --overlay, the files in that directory are copied into the extension,
-and --service-worker replaces the manifest's background service worker
-(Twine uses this to wrap LINE's background.js with its bootstrap worker).
+--service-worker replaces the manifest's background service worker (Twine uses
+this to wrap LINE's background.js with its bootstrap worker), and
+--inject PAGE=SCRIPT adds a <script> tag for SCRIPT to the end of PAGE's <head>.
 
-Usage: crx_unpack.py [--overlay DIR] [--service-worker FILE]
+Usage: crx_unpack.py [--overlay DIR] [--service-worker FILE] [--inject PAGE=SCRIPT]
                      <file.crx> <output-dir> [expected-extension-id]
 """
 import argparse
@@ -69,6 +70,8 @@ def main():
     parser.add_argument("expected_id", nargs="?")
     parser.add_argument("--overlay", help="directory of extra files to copy in")
     parser.add_argument("--service-worker", help="replacement background service worker")
+    parser.add_argument("--inject", action="append", default=[], metavar="PAGE=SCRIPT",
+                        help="add a script tag for SCRIPT to PAGE's <head>")
     args = parser.parse_args()
     crx_path, out_dir, expected = args.crx, args.out_dir, args.expected_id
 
@@ -124,6 +127,16 @@ def main():
         if not os.path.isfile(os.path.join(out_dir, args.service_worker)):
             sys.exit(f"service worker {args.service_worker} not found in extension")
         manifest["background"] = {"service_worker": args.service_worker, "type": "module"}
+    for item in args.inject:
+        page, _, script = item.partition("=")
+        page_path = os.path.join(out_dir, page)
+        with open(page_path, encoding="utf-8") as f:
+            html = f.read()
+        if "</head>" not in html:
+            sys.exit(f"no </head> in {page}")
+        html = html.replace("</head>", f'<script src="{script}"></script></head>', 1)
+        with open(page_path, "w", encoding="utf-8") as f:
+            f.write(html)
     with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2, ensure_ascii=False)
 

@@ -60,10 +60,16 @@ service workers whenever Flatpak's `app-commit` changes. LINE's data is kept.
 
 ### Looking at home on GNOME
 
-- **Window frame**: before each start, `data/twine-prefs.py` also turns on
-  Chromium's GTK theme in the profile. Chromium then draws the title bar and
-  window buttons with the system GTK theme (Adwaita) and follows the system
-  light or dark style.
+- **Window frame**: Chromium can't use a libadwaita header bar, and on Wayland
+  it has to draw its own title bar, which doesn't look like GNOME's. Twine
+  therefore runs Chromium on X11 (XWayland) with "use system title bar", which
+  `data/twine-prefs.py` sets before each start. GNOME's window manager then
+  draws the native Adwaita title bar, buttons and light or dark style around
+  the window, as it does for other X11 apps. It is GNOME's standard title bar
+  height, a little shorter than the header bars in libadwaita apps.
+- **Window title**: `data/bootstrap/twine-title.js` is added to LINE's
+  `index.html` and keeps the window title as "Twine", including when LINE
+  changes it later.
 - **Dock and icon**: the launcher passes `--class=io.github.twinechat.Twine`,
   which sets the X11 WM_CLASS and the Wayland app_id. GNOME then matches the
   window to the `.desktop` file and its icon.
@@ -121,7 +127,7 @@ When you update, also add a `<release>` entry to
 | Permission | Why |
 | --- | --- |
 | `--share=network` | Talking to LINE's servers |
-| `--socket=wayland`, `--socket=fallback-x11`, `--device=dri`, `--share=ipc` | Display and GPU acceleration |
+| `--socket=x11`, `--device=dri`, `--share=ipc` | Display (through XWayland, for the native title bar) and GPU acceleration |
 | `--socket=pulseaudio` | Notification sounds and voice messages |
 | `--talk-name=org.freedesktop.Notifications` | Desktop notifications for new messages |
 | `--filesystem=xdg-download` | Saving received files and images |
@@ -132,7 +138,8 @@ When you update, also add a `<release>` entry to
   `flatpak run io.github.twinechat.Twine --remote-debugging-port=9222`, then open
   `chrome://inspect` in any Chromium-based browser. The launcher passes any
   extra arguments through to Chromium.
-- **Forcing X11**: run `flatpak run io.github.twinechat.Twine --ozone-platform=x11`.
+- **Native Wayland instead of X11** (Chromium then draws its own frame): run
+  `flatpak run --socket=wayland io.github.twinechat.Twine --ozone-platform=wayland`.
 - **Resetting all data and logging out**: run
   `rm -rf ~/.var/app/io.github.twinechat.Twine`.
 - **"`--ozone-platform=wayland` is not compatible with Vulkan" in the log**: this
@@ -145,8 +152,8 @@ io.github.twinechat.Twine.yml      Flatpak manifest
 data/twine.sh                      Launcher (installed as /app/bin/twine)
 data/twine-prefs.py                Prepares the profile: GTK theme, service-worker reset
 data/splash.html                   Startup window shown while the extension loads
-data/bootstrap/                    Files added to the extension: bootstrap worker
-                                   and the twine-activate.html focus page
+data/bootstrap/                    Files added to the extension: bootstrap worker,
+                                   twine-activate.html focus page, title script
 data/*.desktop, *.metainfo.xml     Desktop entry and AppStream metadata
 data/*.svg                         App icon
 tools/crx_unpack.py                CRX3 to unpacked extension, keeping the store ID
