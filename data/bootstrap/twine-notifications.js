@@ -25,8 +25,14 @@
 // you dismiss or click it. While you're in the Twine window, LINE's clears go
 // through, so it can tidy up notifications for chats you're reading.
 //
+// LINE gives its notifications no picture of its own, so it falls back to its
+// built-in logo, an image embedded in its code (a data: URL). Built-in images
+// are left out, and twine-settings-host shows Twine's app icon instead. A real
+// picture (another kind of URL, such as a sender's photo) is passed on.
+//
 // If the portal isn't available (the worker reports twinePortalNotifications),
-// notifications go to Chromium as before, without requireInteraction.
+// notifications go to Chromium as before, without requireInteraction, and with
+// Twine's icon instead of LINE's built-in logo.
 //
 // It runs from <head>, before LINE's own code (main.js, loaded with defer),
 // so LINE only ever sees the wrapped functions.
@@ -64,10 +70,16 @@
     return Promise.resolve(value);
   };
 
+  const isBuiltInImage = (url) => /^data:/i.test(String(url ?? ""));
+  const TWINE_ICON = chrome.runtime.getURL("twine-icon-128.png");
+
+  // For Chromium's notifications: no requireInteraction, and Twine's icon
+  // instead of LINE's built-in logo.
   const withoutRequireInteraction = (args) =>
     args.map((arg) => {
-      if (arg && typeof arg === "object" && "requireInteraction" in arg) {
+      if (arg && typeof arg === "object" && ("requireInteraction" in arg || "iconUrl" in arg)) {
         const { requireInteraction, ...options } = arg;
+        if (isBuiltInImage(options.iconUrl)) options.iconUrl = TWINE_ICON;
         return options;
       }
       return arg;
@@ -93,7 +105,8 @@
   let counter = 0;
 
   async function send(id, options) {
-    const icon = await iconData(options.iconUrl);
+    // Without a picture, GNOME shows Twine's icon.
+    const icon = isBuiltInImage(options.iconUrl) ? null : await iconData(options.iconUrl);
     chrome.runtime
       .sendMessage({
         twineNotification: { id, title: String(options.title ?? ""), body: String(options.message ?? ""), icon },

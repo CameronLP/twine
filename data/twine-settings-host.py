@@ -559,7 +559,9 @@ def notify(msg):
     }
     if notification_portal_version >= 2:
         notification["category"] = GLib.Variant("s", "im.received")
-    icon = None
+    # The notification's picture, or else Twine's app icon (by its icon name,
+    # as installed by Flatpak): GNOME doesn't fill in the app icon itself.
+    icon = Gio.ThemedIcon.new(APP_ID).serialize()
     if msg.get("icon"):
         try:
             data = GLib.Bytes.new(base64.b64decode(msg["icon"]))
