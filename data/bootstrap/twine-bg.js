@@ -44,6 +44,7 @@ async function adoptSplashWindow() {
   if (!win) return openNewMainWindow();
   await chrome.tabs.update(win.tabs[0].id, { url: MAIN_URL });
   await setMainWindow(win.id);
+  enforceMinimumSize();
 }
 
 // Focus the LINE window, or reopen it if it's gone.
@@ -79,37 +80,66 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
   }
 });
 
-// Fallback minimum window size. LINE's page needs at least 680x490 (with
-// twine-layout.js), so a smaller window gets scroll bars on both sides of the
-// whole page (see twine-settings-host). On X11, the
-// settings helper (twine-settings-host) sets a real minimum size that the
-// window manager enforces while resizing, so this never triggers there. Under
+// Minimum window size. LINE's page needs at least 680x490 (with
+// twine-layout.js) at 100% zoom, and proportionally more when zoomed in; a
+// smaller window gets scroll bars on both sides of the whole page. The minimum
+// is never larger than the screen's work area, so a big zoom level can't ask
+// for a window that doesn't fit.
+//
+// On X11, the settings helper (twine-settings-host) sets this minimum on the
+// window, and the window manager enforces it while you resize. Under
 // --ozone-platform=wayland that isn't possible, so once a resize ends below the
-// minimum, grow the window back. The debounce waits until the resize is
-// finished, so the worker doesn't fight the compositor mid-drag.
+// minimum, the window is grown back. The debounce waits until the resize is
+// finished, so the worker doesn't fight the compositor mid-drag. After zooming
+// in, a window that is now too small is grown the same way.
 const MIN_WIDTH = 680;
 const MIN_HEIGHT = 490;
+let pageZoom = 1; // LINE's zoom level. Chromium zooms per origin, so all of LINE's windows share it.
 let minSizeTimer = null;
 
-chrome.windows.onBoundsChanged.addListener((win) => {
-  clearTimeout(minSizeTimer);
-  minSizeTimer = setTimeout(async () => {
-    if (win.id !== (await getMainWindow())) return;
-    let current;
-    try {
-      current = await chrome.windows.get(win.id);
-    } catch {
-      return; // The window was closed.
+async function minimumSize(win) {
+  let width = Math.round(MIN_WIDTH * pageZoom);
+  let height = Math.round(MIN_HEIGHT * pageZoom);
+  try {
+    // The display that holds the middle of the window, or the primary one.
+    const displays = await chrome.system.display.getInfo();
+    const x = win.left + win.width / 2;
+    const y = win.top + win.height / 2;
+    const display =
+      displays.find(({ bounds: b }) => x >= b.left && x < b.left + b.width && y >= b.top && y < b.top + b.height) ??
+      displays.find((d) => d.isPrimary) ??
+      displays[0];
+    if (display) {
+      width = Math.min(width, display.workArea.width);
+      height = Math.min(height, display.workArea.height);
     }
-    if (current.state !== "normal") return; // Maximized, fullscreen, minimized.
-    if (current.width >= MIN_WIDTH && current.height >= MIN_HEIGHT) return;
-    chrome.windows
-      .update(win.id, {
-        width: Math.max(current.width, MIN_WIDTH),
-        height: Math.max(current.height, MIN_HEIGHT),
-      })
-      .catch(() => {});
-  }, 400);
+  } catch {
+    // Without display information, don't limit the minimum.
+  }
+  return { width, height };
+}
+
+async function enforceMinimumSize() {
+  const id = await getMainWindow();
+  if (id === null) return;
+  let win;
+  try {
+    win = await chrome.windows.get(id);
+  } catch {
+    return; // The window was closed.
+  }
+  const min = await minimumSize(win);
+  settingsPort?.postMessage({ command: "min-size", ...min });
+  if (win.state !== "normal") return; // Maximized, fullscreen, minimized.
+  if (win.width >= min.width && win.height >= min.height) return;
+  chrome.windows
+    .update(id, { width: Math.max(win.width, min.width), height: Math.max(win.height, min.height) })
+    .catch(() => {});
+}
+
+chrome.windows.onBoundsChanged.addListener(() => {
+  clearTimeout(minSizeTimer);
+  minSizeTimer = setTimeout(enforceMinimumSize, 400);
 });
 
 // Keep Chromium's browser UI out of Twine. Chromium adds a "Settings" button to
@@ -227,7 +257,12 @@ function updateZoomMenu(factor) {
     () => void chrome.runtime.lastError,
   );
 }
-chrome.tabs.onZoomChange.addListener(({ newZoomFactor }) => updateZoomMenu(newZoomFactor));
+function zoomChanged(factor) {
+  updateZoomMenu(factor);
+  pageZoom = factor;
+  enforceMinimumSize();
+}
+chrome.tabs.onZoomChange.addListener(({ newZoomFactor }) => zoomChanged(newZoomFactor));
 
 function setUpMenu() {
   chrome.contextMenus.removeAll(() => {
@@ -248,7 +283,7 @@ function setUpMenu() {
     chrome.contextMenus.create({ id: "twine-zoom-reset", title: "Reset Zoom", contexts: ["all"] });
     chrome.tabs.query({}, (tabs) => {
       const tab = tabs.find((t) => (t.url || "").startsWith(MAIN_URL));
-      if (tab) chrome.tabs.getZoom(tab.id, updateZoomMenu);
+      if (tab) chrome.tabs.getZoom(tab.id, zoomChanged);
     });
   });
 }
@@ -274,6 +309,8 @@ function connectSettings() {
     chrome.storage.session.set({ twineAppearance: msg.appearance });
     applyToAllTabs();
   });
+  // Tell the helper the current minimum window size.
+  enforceMinimumSize();
   settingsPort.onDisconnect.addListener(() => {
     console.warn("Twine: settings helper disconnected", chrome.runtime.lastError?.message);
     settingsPort = null;

@@ -158,14 +158,18 @@ service workers whenever Flatpak's `app-commit` changes. LINE's data is kept.
   smaller. That is more than half of many screens, and GNOME only offers
   half-screen snapping when the window's minimum width fits in half the
   screen. So `data/bootstrap/twine-layout.js` lets the chat list shrink from
-  328px to 240px in narrow windows, which brings the minimum down to
-  680×490, and the window can't be made smaller than that. Extensions can't
-  set a minimum window size, and Chromium sets none, so
+  328px to 240px in narrow windows and sets the page's minimum to 680×490
+  (62px sidebar + 240px chat list + 375px conversation, rounded up). The
+  window can't be made smaller than that. When you zoom in, the minimum grows
+  with the zoom level (for example 850×613 at 125%), but never beyond the
+  screen's usable area. If the window is too small after zooming in, it grows
+  to fit. Extensions can't set a minimum window size, and Chromium sets none,
+  so the bootstrap worker works out the minimum and
   `data/twine-settings-host.py` writes it into the X11 window's
-  `WM_NORMAL_HINTS` (scaled by `Xft.dpi`), and GNOME's window manager enforces
-  it while you resize. Under `--ozone-platform=wayland` that doesn't work, so
-  the bootstrap worker grows the window back to the minimum after a resize
-  instead.
+  `WM_NORMAL_HINTS` (scaled by `Xft.dpi`). GNOME's window manager then
+  enforces it while you resize. Under `--ozone-platform=wayland` that doesn't
+  work, so the bootstrap worker grows the window back to the minimum after a
+  resize instead.
 
 ## Building
 

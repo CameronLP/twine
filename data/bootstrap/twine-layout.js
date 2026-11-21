@@ -9,17 +9,17 @@
 //
 //   - the chat list stays 328px when there's room and shrinks down to 240px
 //     in narrower windows, and
-//   - #root's minimum width becomes 62 + 240 + 375 = 677px, which fits half
-//     of a 1366px-wide screen.
+//   - #root's minimum width becomes 680px (62 + 240 + 375 = 677, rounded up;
+//     the conversation pane gets the extra 3px), which fits half of a
+//     1366px-wide screen.
 //
 // The selectors match LINE's CSS module names without the build hash, so they
-// keep working across LINE updates. The minimum window size that
-// twine-settings-host and twine-bg.js enforce (MIN_WIDTH) must stay in step
-// with this.
+// keep working across LINE updates. The minimum window size that twine-bg.js
+// works out (MIN_WIDTH, MIN_HEIGHT) must stay in step with this.
 const style = document.createElement("style");
 style.textContent = `
   #root {
-    min-width: 677px !important;
+    min-width: 680px !important;
     min-height: 490px !important;
   }
   [class*="pageLayout-module__wrap__"] {

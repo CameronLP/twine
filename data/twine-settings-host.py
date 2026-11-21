@@ -14,6 +14,9 @@ To the worker, sent at start and whenever something changes:
 
 From the worker:
     {"command": "set", "appearance": "dark"}   saves the choice
+    {"command": "min-size", "width": 748, "height": 539}
+                                               sets the main window's minimum
+                                               size, in logical pixels
 
 The helper exits when Chromium closes the connection.
 """
@@ -109,22 +112,28 @@ def watch_saved_appearance():
 # ---------------------------------------------------------------------------
 # Minimum window size.
 #
-# LINE's page needs at least 680x490 (with Twine's layout change in
-# twine-layout.js, which lets the chat list shrink); a smaller window gets
-# scroll bars on both sides of the whole page. 680px is less than half of
-# most screens, so GNOME still offers half-screen snapping, which it doesn't
-# when the minimum width is more than half the screen. Extensions can't give a window a minimum size, and
-# Chromium sets none on its X11 window, so you could drag Twine smaller than
-# that. This sets the minimum in the window's WM_NORMAL_HINTS, which GNOME's
-# window manager enforces while you resize. Chromium keeps hints set by
-# others when it updates its own. The check repeats every second, so a later
-# rewrite by Chromium is undone.
+# LINE's page needs at least 680x490 at 100% zoom (with Twine's layout change
+# in twine-layout.js, which lets the chat list shrink), and proportionally more
+# when zoomed in; a smaller window gets scroll bars on both sides of the whole
+# page. The bootstrap worker (twine-bg.js) works out the minimum for the
+# current zoom level and sends it here ("min-size"); until it does, 680x490 is
+# used. 680px is less than half of most screens, so GNOME still offers
+# half-screen snapping, which it doesn't when the minimum width is more than
+# half the screen.
+#
+# Extensions can't give a window a minimum size, and Chromium sets none on its
+# X11 window, so you could drag Twine smaller than that. This sets the minimum
+# in the window's WM_NORMAL_HINTS, which GNOME's window manager enforces while
+# you resize. Chromium keeps hints set by others when it updates its own. The
+# check repeats every second, so a later rewrite by Chromium is undone.
 #
 # X11 sizes are in physical pixels, so the minimum (in the same logical pixels
 # as LINE's layout) is multiplied by the scale, Xft.dpi / 96, which is also
 # what Chromium uses.
 # ---------------------------------------------------------------------------
 MIN_WIDTH, MIN_HEIGHT = 680, 490
+min_size = (MIN_WIDTH, MIN_HEIGHT)  # Logical pixels; updated by "min-size".
+min_size_changed = threading.Event()
 # The --app window's X11 class: the instance name Chromium derives from the
 # splash URL, then the --class the launcher passes.
 MAIN_WINDOW_CLASS = ("app_share_twine_splash.html",
@@ -213,25 +222,26 @@ def enforce_min_window_size():
 
     while True:
         factor = scale()
-        min_width, min_height = round(MIN_WIDTH * factor), round(MIN_HEIGHT * factor)
+        min_width, min_height = (round(value * factor) for value in min_size)
         for window in get_property(root, client_list, xa_window) or []:
             if not is_main_window(window):
                 continue
             hints, supplied = XSizeHints(), c_long()
             x.XGetWMNormalHints(display, window, byref(hints), byref(supplied))
-            if hints.flags & P_MIN_SIZE:
-                if hints.min_width >= min_width and hints.min_height >= min_height:
-                    continue
-                min_width = max(min_width, hints.min_width)
-                min_height = max(min_height, hints.min_height)
+            # Set the minimum exactly, so it also goes down after zooming out.
+            if hints.flags & P_MIN_SIZE and (hints.min_width, hints.min_height) == (min_width, min_height):
+                continue
             hints.flags |= P_MIN_SIZE
             hints.min_width, hints.min_height = min_width, min_height
             x.XSetWMNormalHints(display, window, byref(hints))
         x.XFlush(display)
-        time.sleep(1)
+        # Check again in a second, or right away when the minimum changes.
+        min_size_changed.wait(1)
+        min_size_changed.clear()
 
 
 def main():
+    global min_size
     update(appearance=saved_appearance(), systemDark=read_system_dark())
     threading.Thread(target=watch_system_style, daemon=True).start()
     threading.Thread(target=watch_saved_appearance, daemon=True).start()
@@ -246,6 +256,14 @@ def main():
             with open(APPEARANCE_FILE, "w", encoding="utf-8") as f:
                 f.write(msg["appearance"] + "\n")
             update(appearance=msg["appearance"])
+        elif msg.get("command") == "min-size":
+            try:
+                width, height = int(msg["width"]), int(msg["height"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if width > 0 and height > 0:
+                min_size = (width, height)
+                min_size_changed.set()
     if monitor is not None:
         monitor.terminate()
     os._exit(0)
