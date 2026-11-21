@@ -60,12 +60,23 @@ async function focusMainWindow() {
   await openNewMainWindow();
 }
 
-// A second launch of Twine opens twine-activate.html, which sends this message.
+// Messages from Twine's own pages. Each is a string starting with "twine:", so
+// LINE's background.js, which listens too, ignores them.
+//   twine:activate          a second launch of Twine (twine-activate.html)
+//   twine:appearance:<v>    the ☰ menu (twine-menu.js) picked an appearance
+//   twine:zoom:<in|out|reset>  the ☰ menu changed the zoom
 chrome.runtime.onMessage.addListener((msg, sender) => {
-  if (msg !== "twine:activate") return;
-  focusMainWindow().finally(() => {
-    if (sender.tab) chrome.windows.remove(sender.tab.windowId).catch(() => {});
-  });
+  if (typeof msg !== "string" || !msg.startsWith("twine:")) return;
+  const [, kind, value] = msg.split(":");
+  if (kind === "activate") {
+    focusMainWindow().finally(() => {
+      if (sender.tab) chrome.windows.remove(sender.tab.windowId).catch(() => {});
+    });
+  } else if (kind === "appearance") {
+    setAppearance(value);
+  } else if (kind === "zoom" && sender.tab) {
+    zoom(sender.tab.id, value);
+  }
 });
 
 // Fallback minimum window size. LINE's page needs at least 680x490 (with
@@ -183,7 +194,42 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
     .catch(() => {});
 });
 
-function setUpAppearanceMenu() {
+// ---------------------------------------------------------------------------
+// Zoom. Chromium's page zoom (Ctrl +/-/0) already works in Twine's window; these
+// are the same steps for the right-click menu and the ☰ menu. Chromium saves
+// the zoom level in the profile, so it's kept across restarts.
+// ---------------------------------------------------------------------------
+const ZOOM_STEPS = [0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3];
+
+async function zoom(tabId, direction) {
+  try {
+    if (direction === "reset") {
+      await chrome.tabs.setZoom(tabId, 0); // 0 means the default zoom.
+      return;
+    }
+    const current = await chrome.tabs.getZoom(tabId);
+    const next =
+      direction === "in"
+        ? ZOOM_STEPS.find((z) => z > current + 0.001)
+        : ZOOM_STEPS.findLast((z) => z < current - 0.001);
+    if (next) await chrome.tabs.setZoom(tabId, next);
+  } catch {
+    // The tab is gone or can't be zoomed.
+  }
+}
+
+// Show the current zoom in the right-click menu's reset item.
+function updateZoomMenu(factor) {
+  const percent = Math.round(factor * 100);
+  chrome.contextMenus.update(
+    "twine-zoom-reset",
+    { title: percent === 100 ? "Reset Zoom" : `Reset Zoom (${percent}%)`, enabled: percent !== 100 },
+    () => void chrome.runtime.lastError,
+  );
+}
+chrome.tabs.onZoomChange.addListener(({ newZoomFactor }) => updateZoomMenu(newZoomFactor));
+
+function setUpMenu() {
   chrome.contextMenus.removeAll(() => {
     chrome.contextMenus.create({ id: "twine-appearance", title: "Appearance", contexts: ["all"] });
     for (const [value, title] of Object.entries(APPEARANCES)) {
@@ -196,7 +242,23 @@ function setUpAppearanceMenu() {
         contexts: ["all"],
       });
     }
+    chrome.contextMenus.create({ id: "twine-separator", type: "separator", contexts: ["all"] });
+    chrome.contextMenus.create({ id: "twine-zoom-in", title: "Zoom In", contexts: ["all"] });
+    chrome.contextMenus.create({ id: "twine-zoom-out", title: "Zoom Out", contexts: ["all"] });
+    chrome.contextMenus.create({ id: "twine-zoom-reset", title: "Reset Zoom", contexts: ["all"] });
+    chrome.tabs.query({}, (tabs) => {
+      const tab = tabs.find((t) => (t.url || "").startsWith(MAIN_URL));
+      if (tab) chrome.tabs.getZoom(tab.id, updateZoomMenu);
+    });
   });
+}
+
+// Saving goes through the helper, which writes the setting and then reports
+// the new state back, which applies it.
+function setAppearance(value) {
+  if (value in APPEARANCES && settingsPort) {
+    settingsPort.postMessage({ command: "set", appearance: value });
+  }
 }
 
 function connectSettings() {
@@ -208,6 +270,8 @@ function connectSettings() {
     if (menuChanged) {
       chrome.contextMenus.update(MENU_PREFIX + msg.appearance, { checked: true }, () => void chrome.runtime.lastError);
     }
+    // The ☰ menu (twine-menu.js) watches this key to show the current choice.
+    chrome.storage.session.set({ twineAppearance: msg.appearance });
     applyToAllTabs();
   });
   settingsPort.onDisconnect.addListener(() => {
@@ -217,15 +281,13 @@ function connectSettings() {
   });
 }
 
-// Saving goes through the helper, which writes the setting and then reports
-// the new state back, which applies it.
-chrome.contextMenus.onClicked.addListener((info) => {
+chrome.contextMenus.onClicked.addListener((info, tab) => {
   const id = String(info.menuItemId);
-  if (!id.startsWith(MENU_PREFIX) || !settingsPort) return;
-  settingsPort.postMessage({ command: "set", appearance: id.slice(MENU_PREFIX.length) });
+  if (id.startsWith(MENU_PREFIX)) setAppearance(id.slice(MENU_PREFIX.length));
+  else if (id.startsWith("twine-zoom-") && tab) zoom(tab.id, id.slice("twine-zoom-".length));
 });
 
-setUpAppearanceMenu();
+setUpMenu();
 connectSettings();
 
 // Registering these listeners makes sure Chromium starts this worker at launch.
