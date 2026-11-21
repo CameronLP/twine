@@ -1,10 +1,12 @@
-// Twine: a ☰ menu in the top-right corner of LINE's window, with the
-// appearance (Follow System / Light / Dark) and zoom controls that are also in
-// the right-click menu.
+// Twine: a ☰ menu in LINE's sidebar, with the appearance (Follow System /
+// Light / Dark) and zoom controls that are also in the right-click menu.
 //
 // The window's title bar is drawn by GNOME's window manager, so Twine can't put
-// buttons in it. The menu button sits in the empty right end of LINE's top row
-// (the All / Friends / Groups tabs) instead.
+// buttons in it. The menu button sits in LINE's dark-blue sidebar instead, at
+// the top of the bottom group (above the sound and "…" buttons), styled like
+// LINE's own sidebar buttons. Its popover opens to the right of the sidebar.
+// LINE re-renders the sidebar when it switches pages, so the button is put back
+// whenever it goes missing.
 //
 // The menu lives in a shadow root, so LINE's styles and Twine's don't mix. It
 // is styled for light mode only: in dark mode, Chromium's auto dark mode darkens
@@ -38,7 +40,7 @@
     :host { all: initial; }
     * { box-sizing: border-box; font: inherit; }
     .wrap {
-      position: fixed; top: 9px; right: 12px; z-index: 2147483000;
+      display: flex; justify-content: center;
       font: 14px/1.4 "Adwaita Sans", Cantarell, system-ui, sans-serif; color: #1e1e1e;
     }
     button {
@@ -46,10 +48,13 @@
       display: inline-flex; align-items: center; justify-content: center;
     }
     button:focus-visible { outline: 2px solid #3584e4; outline-offset: 1px; }
-    .toggle { width: 34px; height: 34px; border-radius: 8px; color: #555; }
-    .toggle:hover, .toggle[aria-expanded="true"] { background: rgba(0, 0, 0, 0.08); color: #1e1e1e; }
+    /* Like LINE's sidebar buttons (gnb-module__button_action). */
+    .toggle { width: 32px; height: 32px; color: #707991; }
+    .toggle:hover { color: #858fa8; }
+    .toggle[aria-expanded="true"] { color: #fff; }
+    .toggle svg { width: 21px; height: 21px; }
     .popover {
-      position: absolute; top: 40px; right: 0; width: 236px; padding: 12px;
+      position: fixed; z-index: 2147483000; width: 236px; padding: 12px;
       background: #fff; border-radius: 12px;
       box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06), 0 6px 20px rgba(0, 0, 0, 0.18);
     }
@@ -94,6 +99,12 @@
     const percent = root.querySelector(".percent");
 
     const setOpen = (open) => {
+      if (open) {
+        // Next to the button, on the right of the sidebar, bottom-aligned.
+        const rect = toggle.getBoundingClientRect();
+        popover.style.left = `${rect.right + 14}px`;
+        popover.style.bottom = `${Math.max(8, innerHeight - rect.bottom)}px`;
+      }
       popover.hidden = !open;
       toggle.setAttribute("aria-expanded", String(open));
     };
@@ -141,10 +152,30 @@
       });
     });
 
-    document.body.append(host);
+    return host;
+  }
+
+  // Put the button at the top of the sidebar's bottom group, and put it back
+  // when LINE re-renders the sidebar. Before LINE shows its sidebar (the login
+  // page), there's no button; the right-click menu still works there.
+  function start() {
+    const host = build();
+    let queued = false;
+    const place = () => {
+      queued = false;
+      const list = document.querySelector('[class*="gnb-module__nav_bottom_list"]');
+      if (list && list.firstElementChild !== host) list.prepend(host);
+    };
+    new MutationObserver(() => {
+      if (!queued) {
+        queued = true;
+        requestAnimationFrame(place);
+      }
+    }).observe(document.body, { childList: true, subtree: true });
+    place();
   }
 
   // This script runs from <head>, before LINE's page has a <body>.
-  if (document.body) build();
-  else document.addEventListener("DOMContentLoaded", build, { once: true });
+  if (document.body) start();
+  else document.addEventListener("DOMContentLoaded", start, { once: true });
 })();

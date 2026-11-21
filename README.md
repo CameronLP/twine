@@ -20,8 +20,12 @@ desktop notifications.
   photos and Letter Sealing encryption work just as they do in Chrome.
 - **Fits into GNOME.** It has its own launcher entry, icon and dock entry,
   native desktop notifications, and Adwaita-styled window controls.
-- **Dark mode.** Choose Follow System, Light or Dark from the window's
-  right-click menu. The change applies right away.
+- **Dark mode.** Choose Follow System, Light or Dark from the ☰ button in
+  LINE's sidebar or the window's right-click menu. The change applies right
+  away.
+- **Zoom.** Make text and everything else bigger or smaller from the same
+  menus, or with Ctrl + Plus, Ctrl + Minus and Ctrl + 0. Twine remembers the
+  zoom level.
 - **Stays logged in** between restarts.
 - **Snaps to half the screen.** LINE's layout is adjusted so the window fits
   GNOME's side-by-side tiling.
@@ -239,7 +243,8 @@ data/twine-prefs.py                Prepares the profile: GTK theme, service-work
 data/twine-settings-host.py        Native messaging helper: settings and GNOME style
 data/splash.html                   Startup window shown while the extension loads
 data/bootstrap/                    Files added to the extension: bootstrap worker,
-                                   twine-activate.html focus page, title script
+                                   twine-activate.html focus page, title script,
+                                   layout changes, ☰ menu (twine-menu.js)
 data/*.desktop, *.metainfo.xml     Desktop entry and AppStream metadata
 data/*.svg                         App icon
 tools/crx_unpack.py                CRX3 to unpacked extension, keeping the store ID
