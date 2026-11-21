@@ -30,6 +30,17 @@ desktop notifications.
 > LINE code or assets. The extension is downloaded from Google's Chrome Web
 > Store update service when you build the app.
 
+## About this project
+
+I'm not a web developer. I just wanted a way to use LINE from my Linux PC,
+and LINE has no app for Linux.
+
+**AI disclosure:** most of the code and documentation in this repository was
+written with the help of AI ([Claude Code](https://claude.com/claude-code)
+by Anthropic). I tested it on my own computer, but it hasn't been reviewed by
+experienced web or Chromium developers, so please read the code before you
+rely on it. Bug reports and pull requests are welcome.
+
 ## How it works
 
 The LINE extension is a Manifest V3 extension. It uses a module service
