@@ -22,6 +22,9 @@ desktop notifications.
   native desktop notifications, and Adwaita-styled window controls.
 - **Dark mode.** Choose Follow System, Light or Dark from the window's
   right-click menu. The change applies right away.
+- **Stays logged in** between restarts.
+- **Snaps to half the screen.** LINE's layout is adjusted so the window fits
+  GNOME's side-by-side tiling.
 - **Sandboxed.** It runs inside Flatpak with its own private browser profile,
   separate from your normal browser.
 
@@ -140,6 +143,25 @@ service workers whenever Flatpak's `app-commit` changes. LINE's data is kept.
   closes. Other dialogs are left alone.
 - **Profile**: Chromium uses a private profile in
   `~/.var/app/io.github.twinechat.Twine/config/chromium`.
+- **Staying logged in**: LINE's login session is a cookie without an expiry
+  date (`lct`), which Chromium normally drops when it quits. `data/twine-prefs.py`
+  turns on Chromium's "Continue where you left off", which keeps session
+  cookies across restarts. Because Twine always starts with `--app`, Chromium
+  doesn't reopen old windows.
+- **Window size**: the first window opens at 960×680. After that, Chromium
+  remembers the size you leave it at. LINE's page has a minimum size of
+  780×490 (on its `#root` element) and shows scroll bars when the window is
+  smaller. That is more than half of many screens, and GNOME only offers
+  half-screen snapping when the window's minimum width fits in half the
+  screen. So `data/bootstrap/twine-layout.js` lets the chat list shrink from
+  328px to 240px in narrow windows, which brings the minimum down to
+  680×490, and the window can't be made smaller than that. Extensions can't
+  set a minimum window size, and Chromium sets none, so
+  `data/twine-settings-host.py` writes it into the X11 window's
+  `WM_NORMAL_HINTS` (scaled by `Xft.dpi`), and GNOME's window manager enforces
+  it while you resize. Under `--ozone-platform=wayland` that doesn't work, so
+  the bootstrap worker grows the window back to the minimum after a resize
+  instead.
 
 ## Building
 

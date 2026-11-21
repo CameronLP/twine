@@ -41,7 +41,7 @@ modules:
     build-commands:
       # Twine's icon replaces LINE's as the extension icon (context menu).
       - for size in 16 32 48 128; do rsvg-convert -w $size -h $size ${FLATPAK_ID}.svg -o bootstrap/twine-icon-$size.png; done
-      - python3 -I crx_unpack.py --overlay bootstrap --service-worker twine-bg.js --inject index.html=twine-title.js --add-permission contextMenus --add-permission nativeMessaging --add-permission debugger --add-permission tabs --icon 16=twine-icon-16.png --icon 32=twine-icon-32.png --icon 48=twine-icon-48.png --icon 128=twine-icon-128.png line.crx /app/share/line-extension ophjlpahpchlmihnnnihgmmeilfjmjjc
+      - python3 -I crx_unpack.py --overlay bootstrap --service-worker twine-bg.js --inject index.html=twine-title.js --inject index.html=twine-layout.js --add-permission contextMenus --add-permission nativeMessaging --add-permission debugger --add-permission tabs --icon 16=twine-icon-16.png --icon 32=twine-icon-32.png --icon 48=twine-icon-48.png --icon 128=twine-icon-128.png line.crx /app/share/line-extension ophjlpahpchlmihnnnihgmmeilfjmjjc
       - install -Dm755 twine.sh /app/bin/twine
       - install -Dm755 twine-prefs.py /app/libexec/twine-prefs.py
       - install -Dm755 twine-settings-host.py /app/libexec/twine-settings-host

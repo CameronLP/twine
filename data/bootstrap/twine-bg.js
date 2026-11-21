@@ -68,6 +68,39 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
   });
 });
 
+// Fallback minimum window size. LINE's page needs at least 680x490 (with
+// twine-layout.js), so a smaller window gets scroll bars on both sides of the
+// whole page (see twine-settings-host). On X11, the
+// settings helper (twine-settings-host) sets a real minimum size that the
+// window manager enforces while resizing, so this never triggers there. Under
+// --ozone-platform=wayland that isn't possible, so once a resize ends below the
+// minimum, grow the window back. The debounce waits until the resize is
+// finished, so the worker doesn't fight the compositor mid-drag.
+const MIN_WIDTH = 680;
+const MIN_HEIGHT = 490;
+let minSizeTimer = null;
+
+chrome.windows.onBoundsChanged.addListener((win) => {
+  clearTimeout(minSizeTimer);
+  minSizeTimer = setTimeout(async () => {
+    if (win.id !== (await getMainWindow())) return;
+    let current;
+    try {
+      current = await chrome.windows.get(win.id);
+    } catch {
+      return; // The window was closed.
+    }
+    if (current.state !== "normal") return; // Maximized, fullscreen, minimized.
+    if (current.width >= MIN_WIDTH && current.height >= MIN_HEIGHT) return;
+    chrome.windows
+      .update(win.id, {
+        width: Math.max(current.width, MIN_WIDTH),
+        height: Math.max(current.height, MIN_HEIGHT),
+      })
+      .catch(() => {});
+  }, 400);
+});
+
 // Keep Chromium's browser UI out of Twine. Chromium adds a "Settings" button to
 // every notification, which opens chrome://settings in a browser window, and
 // shortcuts such as Ctrl+N open a new-tab window. Close any chrome:// page as
