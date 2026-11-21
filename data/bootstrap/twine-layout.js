@@ -14,11 +14,15 @@
 //     1366px-wide screen.
 //
 // The selectors match LINE's CSS module names without the build hash, so they
-// keep working across LINE updates. The minimum window size that twine-bg.js
-// works out (MIN_WIDTH, MIN_HEIGHT) must stay in step with this.
+// keep working across LINE updates. They only apply to the main window's
+// layout: LINE copies this page's stylesheets (and <html> attributes) into its
+// popup windows (photo viewer, popped-out chats), where this minimum size
+// would force scroll bars. So #root's minimum only applies when it holds the
+// main page layout. The minimum window size that twine-bg.js works out
+// (MIN_WIDTH, MIN_HEIGHT) must stay in step with this.
 const style = document.createElement("style");
 style.textContent = `
-  #root {
+  #root:has([class*="pageLayout-module__wrap__"]) {
     min-width: 680px !important;
     min-height: 490px !important;
   }

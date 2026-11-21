@@ -184,7 +184,8 @@ MIN_WIDTH, MIN_HEIGHT = 680, 490
 min_size = (MIN_WIDTH, MIN_HEIGHT)  # Logical pixels; updated by "min-size".
 min_size_changed = threading.Event()
 # The --app window's X11 class: the instance name Chromium derives from the
-# splash URL, then the --class the launcher passes.
+# splash URL, then the --class the launcher passes. LINE's popup windows get
+# the same class (see choose_main_window).
 main_window = None  # The main window's X11 ID, once found.
 MAIN_WINDOW_CLASS = ("app_share_twine_splash.html",
                      os.environ.get("FLATPAK_ID", "io.github.twinechat.Twine"))
@@ -260,7 +261,7 @@ def enforce_min_window_size():
         match = re.search(rb"^Xft\.dpi:\s*([\d.]+)", resources, re.MULTILINE)
         return float(match.group(1)) / 96 if match else 1.0
 
-    def is_main_window(window):
+    def is_twine_window(window):
         hint = XClassHint()
         if not x.XGetClassHint(display, window, byref(hint)):
             return False
@@ -271,17 +272,36 @@ def enforce_min_window_size():
                 x.XFree(pointer)
         return tuple(names) == MAIN_WINDOW_CLASS
 
+    net_wm_name = x.XInternAtom(display, b"_NET_WM_NAME", 0)
+
+    def choose_main_window(candidates):
+        """LINE's popup windows (photo viewer, popped-out chats) have the same
+        class and role as the main window. The main window is the one titled
+        "Twine" (twine-title.js); otherwise the oldest (lowest ID). At start,
+        it's the only window, so it's found before any popup opens."""
+        for window in candidates:
+            if b"Twine" in (get_property(window, net_wm_name, any_type) or b""):
+                return window
+        return min(candidates) if candidates else None
+
     while True:
         factor = scale()
         min_width, min_height = (round(value * factor) for value in min_size)
-        for window in get_property(root, client_list, xa_window) or []:
-            if not is_main_window(window):
-                continue
-            if main_window != window:
-                main_window = window
+        # Twine's windows: the main window and LINE's popups. Keep the main
+        # window once found, also while it's hidden ("Run in Background"
+        # withdraws it, which takes it out of the client list); choose again
+        # only when it no longer exists.
+        candidates = [w for w in get_property(root, client_list, xa_window) or []
+                      if is_twine_window(w)]
+        if main_window is None or not is_twine_window(main_window):
+            chosen = choose_main_window(candidates)
+            if chosen is not None:
+                main_window = chosen
                 update(canHide=True)
                 if state["background"] or state["autostart"]:
                     threading.Thread(target=request_background, daemon=True).start()
+        # The minimum size is the main window's only; popups keep LINE's sizes.
+        for window in [main_window] if main_window in candidates else []:
             hints, supplied = XSizeHints(), c_long()
             x.XGetWMNormalHints(display, window, byref(hints), byref(supplied))
             # Set the minimum exactly, so it also goes down after zooming out.

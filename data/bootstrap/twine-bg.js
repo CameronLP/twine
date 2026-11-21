@@ -140,6 +140,7 @@ async function minimumSize(win) {
     if (display) {
       width = Math.min(width, display.workArea.width);
       height = Math.min(height, display.workArea.height);
+      return { width, height, workArea: display.workArea };
     }
   } catch {
     // Without display information, don't limit the minimum.
@@ -157,7 +158,7 @@ async function enforceMinimumSize() {
     return; // The window was closed.
   }
   const min = await minimumSize(win);
-  settingsPort?.postMessage({ command: "min-size", ...min });
+  settingsPort?.postMessage({ command: "min-size", width: min.width, height: min.height });
   if (win.state !== "normal") return; // Maximized, fullscreen, minimized.
   if (win.width >= min.width && win.height >= min.height) return;
   chrome.windows
@@ -168,6 +169,91 @@ async function enforceMinimumSize() {
 chrome.windows.onBoundsChanged.addListener(() => {
   clearTimeout(minSizeTimer);
   minSizeTimer = setTimeout(enforceMinimumSize, 400);
+});
+
+// LINE's popup windows (photo viewer, popped-out chats).
+//
+// LINE opens each at the size it saved for that kind of popup, then corrects
+// the size with resizeBy(wanted - measured). Under Twine, that correction runs
+// before the window is on screen, when Chromium reports its outer size as 0x0
+// (and before the zoom level applies), so the window collapses to Chromium's
+// smallest size, 100x100, and LINE then saves that size. So: remember the
+// size each popup was created with (the size LINE asked for), and if it
+// collapses within its first seconds, put that size back right away.
+//
+// As a safety net, once a popup has loaded, check for a few seconds whether
+// its content overflows the window (the same test that decides on scroll bars)
+// and enlarge the window to fit, up to the screen's work area. Neither
+// depends on how LINE builds its popups. Popups can still be made smaller by
+// hand.
+const newPopups = new Map(); // windowId -> { width, height, time }
+
+chrome.windows.onCreated.addListener((win) => {
+  if (win.type === "popup") newPopups.set(win.id, { width: win.width, height: win.height, time: Date.now() });
+});
+chrome.windows.onRemoved.addListener((windowId) => newPopups.delete(windowId));
+chrome.windows.onBoundsChanged.addListener((win) => {
+  const created = newPopups.get(win.id);
+  if (!created) return;
+  if (Date.now() - created.time > 5000) {
+    newPopups.delete(win.id);
+    return;
+  }
+  const collapsed = win.width < created.width / 2 && win.height < created.height / 2;
+  if (collapsed && win.state === "normal") {
+    chrome.windows.update(win.id, { width: created.width, height: created.height }).catch(() => {});
+  }
+});
+async function fitPopup(windowId, tabId) {
+  const zoomFactor = await chrome.tabs.getZoom(tabId).catch(() => 1);
+  for (let attempt = 0; attempt < 15; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    let size;
+    try {
+      await applyToTab(tabId); // Makes sure the debugger is attached.
+      const { result } = await chrome.debugger.sendCommand({ tabId }, "Runtime.evaluate", {
+        // The page or its body scrolls, depending on the popup.
+        expression: `(() => {
+          const d = document.documentElement, b = document.body || d;
+          return { sw: Math.max(d.scrollWidth, b.scrollWidth + (innerWidth - b.clientWidth)),
+                   sh: Math.max(d.scrollHeight, b.scrollHeight + (innerHeight - b.clientHeight)),
+                   iw: innerWidth, ih: innerHeight };
+        })()`,
+        returnByValue: true,
+      });
+      size = result.value;
+    } catch {
+      return; // The popup was closed.
+    }
+    const extraWidth = Math.max(0, size.sw - size.iw);
+    const extraHeight = Math.max(0, size.sh - size.ih);
+    if (!extraWidth && !extraHeight) continue;
+    try {
+      const win = await chrome.windows.get(windowId);
+      if (win.state !== "normal") return;
+      const { width: maxWidth, height: maxHeight } = (await minimumSize(win)).workArea ?? {};
+      const width = win.width + Math.ceil(extraWidth * zoomFactor);
+      const height = win.height + Math.ceil(extraHeight * zoomFactor);
+      await chrome.windows.update(windowId, {
+        width: maxWidth ? Math.min(width, maxWidth) : width,
+        height: maxHeight ? Math.min(height, maxHeight) : height,
+      });
+    } catch {
+      return;
+    }
+  }
+}
+
+chrome.tabs.onUpdated.addListener(async (tabId, change, tab) => {
+  if (change.status !== "complete" || tab.windowId === (await getMainWindow())) return;
+  if (!(tab.url || "").startsWith(chrome.runtime.getURL(""))) return; // LINE's own pages only
+  if ((tab.url || "").includes("twine-activate.html")) return;
+  try {
+    if ((await chrome.windows.get(tab.windowId)).type !== "popup") return;
+  } catch {
+    return;
+  }
+  fitPopup(tab.windowId, tabId);
 });
 
 // Keep Chromium's browser UI out of Twine. Chromium adds a "Settings" button to

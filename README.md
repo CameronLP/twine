@@ -146,6 +146,20 @@ service workers whenever Flatpak's `app-commit` changes. LINE's data is kept.
   but it only reaches pages inside Twine's own Chromium, which is LINE itself.
   Colours are converted automatically, so a few elements may look slightly
   different from LINE's design.
+- **Popup windows**: LINE's photo viewer and popped-out chats are popup
+  windows. LINE opens each at the size it saved for that kind of popup, then
+  corrects the size with `resizeBy(wanted - measured)`. Under Twine, that
+  correction runs before the window is on screen, when Chromium reports its
+  outer size as 0×0 (and before the zoom level applies), so the window
+  collapses to Chromium's smallest size, 100×100, and gets scroll bars. The
+  bootstrap worker remembers the size each popup was created with and puts it
+  back right away if the popup collapses in its first seconds. As a safety
+  net, it also checks once the popup has loaded whether the content overflows
+  the window and enlarges it to fit. LINE copies the main window's stylesheets
+  into its popups, so Twine's minimum layout size (`twine-layout.js`) only
+  applies when the page holds LINE's main layout, and
+  `twine-settings-host.py` sets the minimum window size on the main window
+  only (popups have the same X11 class and role).
 - **Notifications**: Twine sends LINE's notifications through GNOME's
   notification portal, as GNOME apps do, instead of letting Chromium send
   them. `data/bootstrap/twine-notifications.js` wraps `chrome.notifications`
