@@ -8,6 +8,23 @@ in its own desktop window. It works like a normal GNOME app, with its own
 launcher entry, icon, dock grouping, Adwaita-styled window controls and
 desktop notifications.
 
+| Light | Dark |
+| --- | --- |
+| ![Twine in light mode](docs/screenshots/light.png) | ![Twine in dark mode](docs/screenshots/dark.png) |
+
+*Chats and contacts are blurred in these screenshots.*
+
+### Features
+
+- **A real LINE client.** It runs LINE's own extension, so chats, stickers,
+  photos and Letter Sealing encryption work just as they do in Chrome.
+- **Fits into GNOME.** It has its own launcher entry, icon and dock entry,
+  native desktop notifications, and Adwaita-styled window controls.
+- **Dark mode.** Choose Follow System, Light or Dark from the window's
+  right-click menu. The change applies right away.
+- **Sandboxed.** It runs inside Flatpak with its own private browser profile,
+  separate from your normal browser.
+
 > This project is not affiliated with or endorsed by LY Corporation. "LINE"
 > and the LINE logo are trademarks of LY Corporation. This repository has no
 > LINE code or assets. The extension is downloaded from Google's Chrome Web
