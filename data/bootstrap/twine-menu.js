@@ -1,5 +1,6 @@
 // Twine: a ☰ menu in LINE's sidebar, with the appearance (Follow System /
-// Light / Dark) and zoom controls that are also in the right-click menu.
+// Light / Dark), zoom, "Run in Background" and Quit, which are also in the
+// right-click menu. It also handles Ctrl+Q (Quit), as in other GNOME apps.
 //
 // The window's title bar is drawn by GNOME's window manager, so Twine can't put
 // buttons in it. The menu button sits in LINE's dark-blue sidebar instead, at
@@ -67,6 +68,28 @@
     .row button[aria-pressed="true"] { background: #06c755; color: #fff; }
     .row .percent { flex: 1.6; font-variant-numeric: tabular-nums; }
     .row button:disabled { opacity: 0.4; cursor: default; }
+    .separator { height: 1px; background: rgba(0, 0, 0, 0.08); margin: 12px -12px; }
+    .switch-row {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      width: 100%; min-height: 34px; padding: 0 2px; text-align: left;
+    }
+    .switch-row .text { display: flex; flex-direction: column; }
+    .switch-row .note { font-size: 12px; color: #6b6b6b; }
+    .switch-row .note:empty { display: none; }
+    .switch {
+      flex: none; position: relative; width: 40px; height: 22px; border-radius: 11px;
+      background: rgba(0, 0, 0, 0.15); transition: background 150ms;
+    }
+    .switch::after {
+      content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px;
+      border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+      transition: transform 150ms;
+    }
+    .switch-row[aria-checked="true"] .switch { background: #06c755; }
+    .switch-row[aria-checked="true"] .switch::after { transform: translateX(18px); }
+    .switch-row:disabled { opacity: 0.4; cursor: default; }
+    .quit { width: 100%; height: 34px; border-radius: 8px; justify-content: flex-start; padding: 0 2px; }
+    .quit:hover { background: rgba(0, 0, 0, 0.05); }
   `;
 
   function build() {
@@ -91,6 +114,12 @@
             <button data-zoom="reset" class="percent" title="Reset Zoom (Ctrl+0)" aria-label="Reset Zoom">100%</button>
             <button data-zoom="in" title="Zoom In (Ctrl++)" aria-label="Zoom In">${icon("plus")}</button>
           </div>
+          <div class="separator"></div>
+          <button class="switch-row" role="switch" aria-checked="false">
+            <span class="text"><span>Run in Background</span><span class="note"></span></span>
+            <span class="switch" aria-hidden="true"></span>
+          </button>
+          <button class="quit" title="Quit (Ctrl+Q)">Quit</button>
         </div>
       </div>`;
 
@@ -124,6 +153,37 @@
       button.addEventListener("click", () =>
         chrome.runtime.sendMessage(`twine:appearance:${button.dataset.appearance}`).catch(() => {}))
     );
+    // "Run in Background" and Quit (see twine-bg.js, "Running in the background").
+    const backgroundSwitch = root.querySelector(".switch-row");
+    const backgroundNote = root.querySelector(".switch-row .note");
+    backgroundSwitch.addEventListener("click", () => {
+      const on = backgroundSwitch.getAttribute("aria-checked") !== "true";
+      chrome.runtime.sendMessage(`twine:background:${on ? "on" : "off"}`).catch(() => {});
+    });
+    const showBackground = ({ enabled = true, available = false, allowed = true } = {}) => {
+      backgroundSwitch.setAttribute("aria-checked", String(enabled));
+      backgroundSwitch.disabled = !available;
+      backgroundNote.textContent = !available
+        ? "Not available in this mode"
+        : enabled && !allowed
+          ? "Not allowed in GNOME Settings"
+          : "";
+    };
+    chrome.storage.session.get("twineBackground", ({ twineBackground }) => showBackground(twineBackground));
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area === "session" && changes.twineBackground) showBackground(changes.twineBackground.newValue);
+    });
+    const quit = () => chrome.runtime.sendMessage("twine:quit").catch(() => {});
+    root.querySelector(".quit").addEventListener("click", quit);
+    // Ctrl+Q quits, as in other GNOME apps. (Ctrl+W closes the window, which
+    // Chromium already does.)
+    document.addEventListener("keydown", (e) => {
+      if (e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey && e.key.toLowerCase() === "q") {
+        e.preventDefault();
+        quit();
+      }
+    }, true);
+
     root.querySelectorAll("[data-zoom]").forEach((button) =>
       button.addEventListener("click", () =>
         chrome.runtime.sendMessage(`twine:zoom:${button.dataset.zoom}`).catch(() => {}))

@@ -30,6 +30,11 @@ desktop notifications.
 - **Zoom.** Make text and everything else bigger or smaller from the same
   menus, or with Ctrl + Plus, Ctrl + Minus and Ctrl + 0. Twine remembers the
   zoom level.
+- **Runs in the background.** Closing the window keeps Twine running, so
+  new messages still notify you. It's listed under Background Apps in Quick
+  Settings, and opening Twine again brings the window back. Quit from the ☰
+  menu, the right-click menu, Background Apps, or with Ctrl+Q. "Run in
+  Background" can be switched off in the ☰ menu.
 - **Stays logged in** between restarts.
 - **Snaps to half the screen.** LINE's layout is adjusted so the window fits
   GNOME's side-by-side tiling.
@@ -142,19 +147,39 @@ service workers whenever Flatpak's `app-commit` changes. LINE's data is kept.
   browser window, so the bootstrap worker (`tabs` permission) closes any
   `chrome://` page as soon as it opens and shows the Twine window instead. The launcher sets `CHROME_DESKTOP`, so they appear under
   Twine's name and icon, and points `TMPDIR` at a directory GNOME can read, so
-  sender pictures show up. Notifications only arrive while Twine is running:
-  closing the window quits it.
+  sender pictures show up. Notifications only arrive while Twine is running
+  (see "Running in the background").
 - **Do Not Disturb**: LINE creates every notification with
   `requireInteraction: true`. Chromium sends those to GNOME as *critical*
   notifications, which GNOME shows even during Do Not Disturb.
   `data/bootstrap/twine-notifications.js` removes that option before LINE's
   code runs, so Chromium sends normal notifications and GNOME hides them
   during Do Not Disturb, as it does for other apps.
+- **Notification list**: LINE also removes each notification a few seconds
+  after showing it, which with normal notifications would also take it out of
+  GNOME's notification list. The same script skips those removals while the
+  Twine window isn't focused or is hidden, so missed messages stay in the list
+  until you dismiss or click them.
 - **Closing the window**: LINE's page always asks Chromium for a "Leave
   site?" confirmation when it is closed, even with nothing unsaved. Through
-  its debugger session the bootstrap worker accepts that one confirmation
-  (`Page.javascriptDialogOpening` of type `beforeunload`), so the window just
-  closes. Other dialogs are left alone.
+  its debugger session the bootstrap worker answers it
+  (`Page.javascriptDialogOpening` of type `beforeunload`), so the window
+  closes, or hides (see below), without asking. Chromium asks the same before
+  a reload; those are told apart by the navigation request just before, and
+  accepted. Chromium only asks at all once the page has been used, so the
+  worker marks LINE's page as used when it loads (`Runtime.evaluate` with
+  `userGesture`). Other dialogs are left alone.
+- **Running in the background**: LINE's page, not its background script,
+  holds the connection and shows the notifications, so it has to stay open.
+  With "Run in Background" on (the default), closing the main window cancels
+  the close, and `data/twine-settings-host.py` withdraws the X11 window
+  instead. GNOME then sees Twine running with no windows and lists it under
+  Background Apps. Chromium doesn't notice, so LINE keeps running at full
+  speed. Opening Twine again (through `twine-activate.html`) or clicking a
+  notification maps the window again. The helper asks for permission through
+  the Background portal; if GNOME denies it, or under
+  `--ozone-platform=wayland`, where the window can't be hidden, closing quits.
+  Quit closes every window and accepts the confirmation, so Chromium exits.
 - **Profile**: Chromium uses a private profile in
   `~/.var/app/io.github.twinechat.Twine/config/chromium`.
 - **Staying logged in**: LINE's login session is a cookie without an expiry

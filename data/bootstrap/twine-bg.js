@@ -47,11 +47,14 @@ async function adoptSplashWindow() {
   enforceMinimumSize();
 }
 
-// Focus the LINE window, or reopen it if it's gone.
+// Focus the LINE window, or reopen it if it's gone. If it was hidden (see
+// "Running in the background"), show it first.
 async function focusMainWindow() {
   const id = await getMainWindow();
   if (id !== null) {
     try {
+      await chrome.windows.get(id); // Throws if the window is gone.
+      if (windowHidden) await showMainWindow();
       await chrome.windows.update(id, { focused: true });
       return;
     } catch {
@@ -66,6 +69,8 @@ async function focusMainWindow() {
 //   twine:activate          a second launch of Twine (twine-activate.html)
 //   twine:appearance:<v>    the ☰ menu (twine-menu.js) picked an appearance
 //   twine:zoom:<in|out|reset>  the ☰ menu changed the zoom
+//   twine:background:<on|off>  the ☰ menu changed "Run in Background"
+//   twine:quit              the ☰ menu's Quit, or Ctrl+Q (twine-menu.js)
 chrome.runtime.onMessage.addListener((msg, sender) => {
   if (typeof msg !== "string" || !msg.startsWith("twine:")) return;
   const [, kind, value] = msg.split(":");
@@ -77,6 +82,10 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
     setAppearance(value);
   } else if (kind === "zoom" && sender.tab) {
     zoom(sender.tab.id, value);
+  } else if (kind === "background") {
+    setBackground(value === "on");
+  } else if (kind === "quit") {
+    quit();
   }
 });
 
@@ -206,22 +215,65 @@ async function applyToAllTabs() {
   await Promise.all(tabs.map((tab) => applyToTab(tab.id)));
 }
 
-chrome.tabs.onUpdated.addListener((tabId, change) => {
+chrome.tabs.onUpdated.addListener((tabId, change, tab) => {
   if (change.status === "loading" || change.url) applyToTab(tabId);
+  if (change.status === "complete" && (tab.url || "").startsWith(MAIN_URL)) markPageUsed(tabId);
 });
+
+// Chromium only asks "Leave site?" (see below) if the page has been used: you
+// have clicked or typed in it since it loaded. Without the question, closing
+// the window right after starting Twine would quit it even with "Run in
+// Background" on. So once LINE's page has loaded, mark it as used, by running
+// an empty script as if from a click (Runtime.evaluate with userGesture).
+async function markPageUsed(tabId) {
+  await applyToTab(tabId); // Makes sure the debugger is attached.
+  chrome.debugger
+    .sendCommand({ tabId }, "Runtime.evaluate", { expression: "void 0", userGesture: true })
+    .catch(() => {});
+}
 chrome.tabs.onCreated.addListener((tab) => applyToTab(tab.id));
 chrome.tabs.onRemoved.addListener((tabId) => attachedTabs.delete(tabId));
 chrome.debugger.onDetach.addListener((source) => attachedTabs.delete(source.tabId));
 
 // LINE's page always registers a beforeunload handler that cancels closing
 // (its message is empty and nothing ever sets it), so Chromium asks "Leave
-// site?" every time the window is closed. Accept only that confirmation, so
-// closing Twine works like closing any other app. Other dialogs are left alone.
-chrome.debugger.onEvent.addListener((source, method, params) => {
+// site?" every time the window is closed. Twine answers that question itself,
+// so closing works like in any other app:
+//
+//   - With "Run in Background" on, closing the main window hides it instead,
+//     and LINE keeps running (see "Running in the background" below).
+//   - Otherwise, when quitting, for LINE's other windows, and when LINE
+//     reloads or navigates its own page, the confirmation is accepted.
+//
+// Chromium asks the same question before a reload or navigation. Those are
+// told apart by the navigation request Chromium reports just before asking.
+// Other dialogs are left alone.
+const recentNavigation = new Map(); // tabId -> time of its last navigation request
+
+chrome.debugger.onEvent.addListener(async (source, method, params) => {
+  if (
+    method === "Page.frameRequestedNavigation" ||
+    method === "Page.frameStartedNavigating" ||
+    method === "Page.frameScheduledNavigation"
+  ) {
+    recentNavigation.set(source.tabId, Date.now());
+    return;
+  }
   if (method !== "Page.javascriptDialogOpening" || params.type !== "beforeunload") return;
-  chrome.debugger
-    .sendCommand(source, "Page.handleJavaScriptDialog", { accept: true })
+  const navigating = Date.now() - (recentNavigation.get(source.tabId) ?? 0) < 2000;
+  let hide = false;
+  if (!quitting && !navigating && runInBackground()) {
+    try {
+      const tab = await chrome.tabs.get(source.tabId);
+      hide = tab.windowId === (await getMainWindow());
+    } catch {
+      // The tab is gone.
+    }
+  }
+  await chrome.debugger
+    .sendCommand(source, "Page.handleJavaScriptDialog", { accept: !hide })
     .catch(() => {});
+  if (hide) hideMainWindow();
 });
 
 // ---------------------------------------------------------------------------
@@ -281,6 +333,16 @@ function setUpMenu() {
     chrome.contextMenus.create({ id: "twine-zoom-in", title: "Zoom In", contexts: ["all"] });
     chrome.contextMenus.create({ id: "twine-zoom-out", title: "Zoom Out", contexts: ["all"] });
     chrome.contextMenus.create({ id: "twine-zoom-reset", title: "Reset Zoom", contexts: ["all"] });
+    chrome.contextMenus.create({ id: "twine-separator-2", type: "separator", contexts: ["all"] });
+    chrome.contextMenus.create({
+      id: "twine-background",
+      title: "Run in Background",
+      type: "checkbox",
+      checked: Boolean(appearance.background),
+      enabled: Boolean(appearance.canHide),
+      contexts: ["all"],
+    });
+    chrome.contextMenus.create({ id: "twine-quit", title: "Quit", contexts: ["all"] });
     chrome.tabs.query({}, (tabs) => {
       const tab = tabs.find((t) => (t.url || "").startsWith(MAIN_URL));
       if (tab) chrome.tabs.getZoom(tab.id, zoomChanged);
@@ -305,8 +367,20 @@ function connectSettings() {
     if (menuChanged) {
       chrome.contextMenus.update(MENU_PREFIX + msg.appearance, { checked: true }, () => void chrome.runtime.lastError);
     }
-    // The ☰ menu (twine-menu.js) watches this key to show the current choice.
-    chrome.storage.session.set({ twineAppearance: msg.appearance });
+    chrome.contextMenus.update(
+      "twine-background",
+      { checked: Boolean(msg.background), enabled: Boolean(msg.canHide) },
+      () => void chrome.runtime.lastError,
+    );
+    // The ☰ menu (twine-menu.js) watches these keys to show the current state.
+    chrome.storage.session.set({
+      twineAppearance: msg.appearance,
+      twineBackground: {
+        enabled: Boolean(msg.background),
+        available: Boolean(msg.canHide),
+        allowed: msg.backgroundAllowed !== false,
+      },
+    });
     applyToAllTabs();
   });
   // Tell the helper the current minimum window size.
@@ -322,7 +396,64 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   const id = String(info.menuItemId);
   if (id.startsWith(MENU_PREFIX)) setAppearance(id.slice(MENU_PREFIX.length));
   else if (id.startsWith("twine-zoom-") && tab) zoom(tab.id, id.slice("twine-zoom-".length));
+  else if (id === "twine-background") setBackground(info.checked);
+  else if (id === "twine-quit") quit();
 });
+
+// ---------------------------------------------------------------------------
+// Running in the background.
+//
+// LINE's page, not its background script, keeps the connection and shows the
+// notifications, so it has to stay open for messages to arrive. With "Run in
+// Background" on (the default), closing the main window hides it instead
+// (twine-settings-host withdraws it on X11), and GNOME lists Twine under
+// Background Apps. Opening Twine again, or clicking a notification, shows the
+// window. Quit (menus, Ctrl+Q, or Background Apps in Quick Settings) really
+// quits.
+//
+// Hiding needs X11 (the default). Under --ozone-platform=wayland, and when
+// GNOME's background permission is denied, closing quits as before.
+// ---------------------------------------------------------------------------
+let quitting = false;
+let windowHidden = false;
+
+const runInBackground = () =>
+  Boolean(appearance.background && appearance.canHide && appearance.backgroundAllowed !== false);
+
+function setBackground(enabled) {
+  settingsPort?.postMessage({ command: "set-background", enabled: Boolean(enabled) });
+}
+
+// twineHidden in chrome.storage.session tells LINE's page (twine-notifications.js)
+// that its window is hidden: Chromium doesn't notice, so the page still thinks
+// it has focus.
+function hideMainWindow() {
+  windowHidden = true;
+  chrome.storage.session.set({ twineHidden: true });
+  settingsPort?.postMessage({ command: "hide" });
+}
+
+async function showMainWindow() {
+  windowHidden = false;
+  chrome.storage.session.set({ twineHidden: false });
+  settingsPort?.postMessage({ command: "show" });
+  // Give the window manager a moment to map the window before focusing it.
+  await new Promise((resolve) => setTimeout(resolve, 150));
+}
+
+// Close every window, accepting LINE's "Leave site?" question; Chromium then
+// exits. A hidden main window is shown first, so Chromium can close it
+// normally.
+async function quit() {
+  quitting = true;
+  if (windowHidden) await showMainWindow();
+  const windows = await chrome.windows.getAll({ windowTypes: ["normal", "popup", "app"] });
+  await Promise.all(windows.map((w) => chrome.windows.remove(w.id).catch(() => {})));
+}
+
+// LINE focuses its window when a notification is clicked, which doesn't show
+// a hidden window.
+chrome.notifications.onClicked.addListener(() => focusMainWindow());
 
 setUpMenu();
 connectSettings();
