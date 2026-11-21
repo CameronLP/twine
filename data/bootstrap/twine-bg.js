@@ -72,6 +72,15 @@ async function focusMainWindow() {
 //   twine:background:<on|off>  the ☰ menu changed "Run in Background"
 //   twine:quit              the ☰ menu's Quit, or Ctrl+Q (twine-menu.js)
 chrome.runtime.onMessage.addListener((msg, sender) => {
+  // LINE's notifications, from twine-notifications.js (see "Notifications").
+  if (msg?.twineNotification) {
+    settingsPort?.postMessage({ command: "notify", ...msg.twineNotification });
+    return;
+  }
+  if (msg?.twineWithdrawNotification) {
+    settingsPort?.postMessage({ command: "withdraw-notification", id: msg.twineWithdrawNotification });
+    return;
+  }
   if (typeof msg !== "string" || !msg.startsWith("twine:")) return;
   const [, kind, value] = msg.split(":");
   if (kind === "activate") {
@@ -361,6 +370,19 @@ function setAppearance(value) {
 function connectSettings() {
   settingsPort = chrome.runtime.connectNative(SETTINGS_HOST);
   settingsPort.onMessage.addListener((msg) => {
+    if (msg?.event === "notification-clicked") {
+      notificationClicked(msg.id);
+      return;
+    }
+    if (msg?.event === "quit") {
+      quit();
+      return;
+    }
+    if (msg?.event === "activate") {
+      // GNOME asked Twine to show itself (app grid, D-Bus activation).
+      started.then(focusMainWindow);
+      return;
+    }
     if (!msg || !(msg.appearance in APPEARANCES)) return;
     const menuChanged = msg.appearance !== appearance.appearance;
     appearance = msg;
@@ -374,6 +396,7 @@ function connectSettings() {
     );
     // The ☰ menu (twine-menu.js) watches these keys to show the current state.
     chrome.storage.session.set({
+      twinePortalNotifications: Boolean(msg.portalNotifications),
       twineAppearance: msg.appearance,
       twineBackground: {
         enabled: Boolean(msg.background),
@@ -452,8 +475,30 @@ async function quit() {
 }
 
 // LINE focuses its window when a notification is clicked, which doesn't show
-// a hidden window.
+// a hidden window. (For notifications Chromium still shows, when the portal
+// isn't available.)
 chrome.notifications.onClicked.addListener(() => focusMainWindow());
+
+// ---------------------------------------------------------------------------
+// Notifications. twine-notifications.js hands LINE's notifications to this
+// worker, and twine-settings-host sends them through GNOME's notification
+// portal (see twine-notifications.js for why). When one is clicked, the helper
+// reports it: show the window, then let LINE's page run LINE's own click
+// handler, which opens the chat.
+// ---------------------------------------------------------------------------
+let lastClick = { id: null, time: 0 };
+
+async function notificationClicked(id) {
+  // Some portal versions report a click twice (signal and activation).
+  if (id === lastClick.id && Date.now() - lastClick.time < 2000) return;
+  lastClick = { id, time: Date.now() };
+  // When the click started Twine, wait until its window is set up.
+  await started;
+  await focusMainWindow();
+  const tabs = await chrome.tabs.query({});
+  const tab = tabs.find((t) => (t.url || "").startsWith(MAIN_URL));
+  if (tab) chrome.tabs.sendMessage(tab.id, `twine:notification-clicked:${id}`).catch(() => {});
+}
 
 setUpMenu();
 connectSettings();
@@ -464,7 +509,9 @@ chrome.runtime.onInstalled.addListener(() => {});
 
 // Adopt the splash window once per browser session. Session storage is cleared
 // when Chromium exits, so later service-worker restarts don't run this again.
-(async () => {
+// Requests to show the window wait for this (started), so they can't open a
+// second window while Twine is starting.
+const started = (async () => {
   const { twineStarted } = await chrome.storage.session.get("twineStarted");
   if (twineStarted) return;
   await chrome.storage.session.set({ twineStarted: true });

@@ -141,25 +141,41 @@ service workers whenever Flatpak's `app-commit` changes. LINE's data is kept.
   but it only reaches pages inside Twine's own Chromium, which is LINE itself.
   Colours are converted automatically, so a few elements may look slightly
   different from LINE's design.
-- **Notifications**: LINE's notifications are sent as native GNOME
-  notifications. Chromium adds a **Settings** button to each one, which can't
-  be removed without patching Chromium. It would open Chromium's settings in a
-  browser window, so the bootstrap worker (`tabs` permission) closes any
-  `chrome://` page as soon as it opens and shows the Twine window instead. The launcher sets `CHROME_DESKTOP`, so they appear under
-  Twine's name and icon, and points `TMPDIR` at a directory GNOME can read, so
-  sender pictures show up. Notifications only arrive while Twine is running
-  (see "Running in the background").
-- **Do Not Disturb**: LINE creates every notification with
-  `requireInteraction: true`. Chromium sends those to GNOME as *critical*
-  notifications, which GNOME shows even during Do Not Disturb.
-  `data/bootstrap/twine-notifications.js` removes that option before LINE's
-  code runs, so Chromium sends normal notifications and GNOME hides them
-  during Do Not Disturb, as it does for other apps.
-- **Notification list**: LINE also removes each notification a few seconds
-  after showing it, which with normal notifications would also take it out of
-  GNOME's notification list. The same script skips those removals while the
+- **Notifications**: Twine sends LINE's notifications through GNOME's
+  notification portal, as GNOME apps do, instead of letting Chromium send
+  them. `data/bootstrap/twine-notifications.js` wraps `chrome.notifications`
+  in LINE's page and hands each notification (title, text, picture) to the
+  bootstrap worker, which passes it to `data/twine-settings-host.py`, which
+  sends it to the portal (category `im.received`, normal priority). Compared
+  with Chromium's notifications, they:
+  - stay in GNOME's notification list after Twine quits,
+  - are hidden during Do Not Disturb (LINE asks for `requireInteraction`,
+    which Chromium sends as *critical*, and GNOME shows critical
+    notifications even during Do Not Disturb),
+  - have no **Settings** button (Chromium adds one to each of its
+    notifications).
+
+  LINE also removes each notification a few seconds after showing it, which
+  would take it out of GNOME's list. Those removals are skipped while the
   Twine window isn't focused or is hidden, so missed messages stay in the list
   until you dismiss or click them.
+
+  Clicking a notification calls LINE's own click handler, so LINE opens the
+  chat. If the portal isn't available, notifications go to Chromium as before
+  (without `requireInteraction`). Chromium's **Settings** button would open
+  Chromium's settings in a browser window, so the bootstrap worker (`tabs`
+  permission) closes any `chrome://` page as soon as it opens and shows the
+  Twine window instead. The launcher sets `CHROME_DESKTOP`, so those appear
+  under Twine's name and icon.
+- **Opening Twine through D-Bus**: like GNOME's own apps, Twine is D-Bus
+  activatable (`DBusActivatable=true` in the desktop file). While it runs,
+  `data/twine-settings-host.py` owns the bus name `io.github.twinechat.Twine`
+  and answers GNOME's `org.freedesktop.Application` requests: *Activate* (the
+  app grid) shows the window, and *ActivateAction* handles clicked
+  notifications (`open-chat`), the dock menu's appearance actions, and `quit`
+  (Background Apps in Quick Settings). If Twine isn't running, the bus starts
+  it first (`data/io.github.twinechat.Twine.service`), so clicking a
+  notification after quitting opens Twine.
 - **Closing the window**: LINE's page always asks Chromium for a "Leave
   site?" confirmation when it is closed, even with nothing unsaved. Through
   its debugger session the bootstrap worker answers it
@@ -285,6 +301,7 @@ data/bootstrap/                    Files added to the extension: bootstrap worke
                                    twine-activate.html focus page, title script,
                                    layout changes, ☰ menu (twine-menu.js)
 data/*.desktop, *.metainfo.xml     Desktop entry and AppStream metadata
+data/*.service                     D-Bus service file (starts Twine on activation)
 data/*.svg                         App icon
 tools/crx_unpack.py                CRX3 to unpacked extension, keeping the store ID
 tools/update-sources.sh            Re-pins the extension and Chromium hashes

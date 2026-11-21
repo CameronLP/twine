@@ -46,6 +46,9 @@ modules:
       - install -Dm755 twine-prefs.py /app/libexec/twine-prefs.py
       - install -Dm755 twine-settings-host.py /app/libexec/twine-settings-host
       - install -Dm644 ${FLATPAK_ID}.desktop -t /app/share/applications/
+      # D-Bus activation (see twine-settings-host): GNOME starts Twine through
+      # the bus, e.g. when a notification is clicked after Twine has quit.
+      - install -Dm644 ${FLATPAK_ID}.service -t /app/share/dbus-1/services/
       - install -Dm644 ${FLATPAK_ID}.metainfo.xml -t /app/share/metainfo/
       - install -Dm644 ${FLATPAK_ID}.svg -t /app/share/icons/hicolor/scalable/apps/
       - install -Dm644 splash.html ${FLATPAK_ID}.svg -t /app/share/twine/
@@ -69,6 +72,8 @@ modules:
         dest: bootstrap
       - type: file
         path: data/io.github.twinechat.Twine.desktop
+      - type: file
+        path: data/io.github.twinechat.Twine.service
       - type: file
         path: data/io.github.twinechat.Twine.metainfo.xml
       - type: file

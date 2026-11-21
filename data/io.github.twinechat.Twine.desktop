@@ -10,6 +10,7 @@ Categories=Network;InstantMessaging;Chat;
 Keywords=line;chat;messenger;twine;
 StartupNotify=true
 StartupWMClass=io.github.twinechat.Twine
+DBusActivatable=true
 Actions=appearance-system;appearance-light;appearance-dark;
 
 [Desktop Action appearance-system]

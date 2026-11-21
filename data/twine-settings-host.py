@@ -9,7 +9,7 @@ by UTF-8 JSON.
 To the worker, sent at start and whenever something changes:
     {"appearance": "system" | "light" | "dark", "systemDark": true | false,
      "background": true | false, "canHide": true | false,
-     "backgroundAllowed": true | false | null}
+     "backgroundAllowed": true | false | null, "portalNotifications": true | false}
   "appearance" is Twine's saved choice ($XDG_CONFIG_HOME/twine/appearance,
   which the dock-menu actions also write). "systemDark" is GNOME's light/dark
   style, watched live through the settings portal. "background" is the saved
@@ -17,7 +17,12 @@ To the worker, sent at start and whenever something changes:
   it says "off"). "canHide" turns true once the helper has found the main
   window on X11, so it can hide and show it. "backgroundAllowed" is GNOME's
   answer to Twine's background permission request (null until it answers,
-  or when there is no background portal).
+  or when there is no background portal). "portalNotifications" is true when
+  GNOME's notification portal can be used.
+    {"event": "notification-clicked", "id": "..."}
+  is sent when one of Twine's notifications is clicked, and
+    {"event": "activate"} / {"event": "quit"}
+  when GNOME asks Twine to show itself or to quit (see "D-Bus activation").
 
 From the worker:
     {"command": "set", "appearance": "dark"}   saves the choice
@@ -27,6 +32,10 @@ From the worker:
     {"command": "set-background", "enabled": true}
                                                saves "Run in Background"
     {"command": "hide"} / {"command": "show"}  hides or shows the main window
+    {"command": "notify", "id": "...", "title": "...", "body": "...",
+     "icon": "<base64 image>" | null}          shows (or replaces) a notification
+    {"command": "withdraw-notification", "id": "..."}
+                                               removes one
 
 The helper exits when Chromium closes the connection.
 """
@@ -50,7 +59,8 @@ PORTAL = ["--session", "--dest", "org.freedesktop.portal.Desktop",
 send_lock = threading.Lock()
 state_lock = threading.Lock()
 state = {"appearance": None, "systemDark": None,
-         "background": None, "canHide": False, "backgroundAllowed": None}
+         "background": None, "canHide": False, "backgroundAllowed": None,
+         "portalNotifications": False}
 monitor = None  # the "gdbus monitor" child process
 
 
@@ -325,13 +335,17 @@ def request_background():
         gi.require_version("Gio", "2.0")
         from gi.repository import Gio, GLib
         bus = Gio.bus_get_sync(Gio.BusType.SESSION)
+        # This thread runs its own GLib main loop; signals are delivered in the
+        # main context that is the thread's default when subscribing.
+        context = GLib.MainContext.new()
+        context.push_thread_default()
         # The portal answers with a Response signal on a request object whose
         # path follows from our bus name and a token we choose. Subscribe
         # before asking, so a quick answer isn't missed.
         token = f"twine_{os.getpid()}_{int(time.time())}"
         sender = bus.get_unique_name()[1:].replace(".", "_")
         path = f"/org/freedesktop/portal/desktop/request/{sender}/{token}"
-        loop = GLib.MainLoop()
+        loop = GLib.MainLoop.new(context, False)
 
         def on_response(connection, sender_name, object_path, interface, signal, params):
             code, results = params.unpack()
@@ -356,13 +370,183 @@ def request_background():
             bus.signal_unsubscribe(subscription)
             update(backgroundAllowed=None)
             return
-        GLib.timeout_add_seconds(600, loop.quit)  # Don't wait forever.
+        timeout = GLib.timeout_source_new_seconds(600)  # Don't wait forever.
+        timeout.set_callback(lambda *args: loop.quit())
+        timeout.attach(context)
         loop.run()
         bus.signal_unsubscribe(subscription)
     except Exception as e:  # Never let this crash the helper.
         print(f"twine-settings-host: background request failed: {e}", file=sys.stderr)
     finally:
         background_requested.release()
+
+
+# ---------------------------------------------------------------------------
+# Notifications, through GNOME's notification portal (see
+# twine-notifications.js). Clicks come back through D-Bus activation (below).
+# ---------------------------------------------------------------------------
+PORTAL_NAME = "org.freedesktop.portal.Desktop"
+PORTAL_PATH = "/org/freedesktop/portal/desktop"
+NOTIFICATION_IFACE = "org.freedesktop.portal.Notification"
+notification_bus = None
+notification_portal_version = 0
+
+
+# ---------------------------------------------------------------------------
+# D-Bus activation. GNOME talks to D-Bus activatable apps (DBusActivatable=true
+# in the desktop file) through the org.freedesktop.Application interface on
+# the bus name that is their app ID: Activate when opened from the app grid,
+# ActivateAction for the dock menu's actions, clicked notifications, and
+# "quit" (Background Apps in Quick Settings).
+# If nobody owns the name, the bus starts Twine first
+# (io.github.twinechat.Twine.service), and the call waits until this helper
+# owns it. This is how clicking a notification opens Twine after it has quit.
+# ---------------------------------------------------------------------------
+APP_ID = os.environ.get("FLATPAK_ID", "io.github.twinechat.Twine")
+APP_PATH = "/" + APP_ID.replace(".", "/")
+APPLICATION_XML = """
+<node>
+  <interface name="org.freedesktop.Application">
+    <method name="Activate"><arg type="a{sv}" name="platform_data" direction="in"/></method>
+    <method name="Open">
+      <arg type="as" name="uris" direction="in"/>
+      <arg type="a{sv}" name="platform_data" direction="in"/>
+    </method>
+    <method name="ActivateAction">
+      <arg type="s" name="action_name" direction="in"/>
+      <arg type="av" name="parameter" direction="in"/>
+      <arg type="a{sv}" name="platform_data" direction="in"/>
+    </method>
+  </interface>
+</node>
+"""
+
+
+def save_appearance(value):
+    os.makedirs(CONFIG_DIR, exist_ok=True)
+    with open(APPEARANCE_FILE, "w", encoding="utf-8") as f:
+        f.write(value + "\n")
+    update(appearance=value)
+
+
+def on_application_call(connection, sender, path, interface, method, params, invocation):
+    if method in ("Activate", "Open"):
+        send_message({"event": "activate"})
+    elif method == "ActivateAction":
+        action, parameter, _platform_data = params.unpack()
+        if action == "open-chat":
+            # The notification's ID, from its default-action-target.
+            notification_id = parameter[0] if parameter else ""
+            send_message({"event": "notification-clicked", "id": str(notification_id)})
+        elif action == "quit":
+            # Background Apps in Quick Settings asks apps to quit this way.
+            send_message({"event": "quit"})
+        elif action.startswith("appearance-") and action[len("appearance-"):] in APPEARANCES:
+            save_appearance(action[len("appearance-"):])
+        else:
+            send_message({"event": "activate"})
+    invocation.return_value(None)
+
+
+def start_dbus():
+    """Own Twine's bus name, answer GNOME's app requests, and check for the
+    notification portal. Runs its own GLib main loop in this thread."""
+    global notification_bus, notification_portal_version
+    try:
+        import gi
+        gi.require_version("Gio", "2.0")
+        from gi.repository import Gio, GLib
+        context = GLib.MainContext.new()
+        context.push_thread_default()
+        bus = Gio.bus_get_sync(Gio.BusType.SESSION)
+    except Exception as e:
+        print(f"twine-settings-host: no D-Bus: {e}", file=sys.stderr)
+        return
+
+    try:
+        interface = Gio.DBusNodeInfo.new_for_xml(APPLICATION_XML).interfaces[0]
+        bus.register_object(APP_PATH, interface, on_application_call, None, None)
+        Gio.bus_own_name_on_connection(bus, APP_ID, Gio.BusNameOwnerFlags.NONE, None, None)
+    except Exception as e:
+        print(f"twine-settings-host: can't own {APP_ID}: {e}", file=sys.stderr)
+
+    try:
+        version = bus.call_sync(
+            PORTAL_NAME, PORTAL_PATH, "org.freedesktop.DBus.Properties", "Get",
+            GLib.Variant("(ss)", (NOTIFICATION_IFACE, "version")), None,
+            Gio.DBusCallFlags.NONE, 5000, None).unpack()[0]
+
+        # Clicks are reported to Twine as ActivateAction("open-chat") (above)
+        # or, by some portal versions, with this signal.
+        def on_action(connection, sender, path, interface, signal, params):
+            send_message({"event": "notification-clicked", "id": params.unpack()[0]})
+
+        bus.signal_subscribe(PORTAL_NAME, NOTIFICATION_IFACE, "ActionInvoked", PORTAL_PATH,
+                             None, Gio.DBusSignalFlags.NONE, on_action)
+        notification_bus, notification_portal_version = bus, version
+        update(portalNotifications=True)
+    except Exception as e:  # No portal: Chromium shows the notifications.
+        print(f"twine-settings-host: notification portal unavailable: {e}", file=sys.stderr)
+
+    GLib.MainLoop.new(context, False).run()
+
+
+def notify(msg):
+    if notification_bus is None:
+        return
+    import base64
+    from gi.repository import Gio, GLib
+    notification = {
+        "title": GLib.Variant("s", str(msg.get("title") or "LINE")),
+        "body": GLib.Variant("s", str(msg.get("body") or "")),
+        "priority": GLib.Variant("s", "normal"),
+        # GNOME activates this action with the notification's ID (see "D-Bus
+        # activation"), starting Twine first if it isn't running.
+        "default-action": GLib.Variant("s", "app.open-chat"),
+        "default-action-target": GLib.Variant("s", str(msg["id"])),
+    }
+    if notification_portal_version >= 2:
+        notification["category"] = GLib.Variant("s", "im.received")
+    icon = None
+    if msg.get("icon"):
+        try:
+            data = GLib.Bytes.new(base64.b64decode(msg["icon"]))
+            icon = Gio.BytesIcon.new(data).serialize()
+        except (ValueError, TypeError):
+            pass
+
+    def add(with_icon):
+        options = dict(notification)
+        if with_icon:
+            options["icon"] = icon
+        notification_bus.call_sync(
+            PORTAL_NAME, PORTAL_PATH, NOTIFICATION_IFACE, "AddNotification",
+            GLib.Variant("(sa{sv})", (str(msg["id"]), options)), None,
+            Gio.DBusCallFlags.NONE, 5000, None)
+
+    try:
+        add(icon is not None)
+    except GLib.Error as e:
+        if icon is None:
+            print(f"twine-settings-host: notification failed: {e}", file=sys.stderr)
+            return
+        try:
+            add(False)  # The portal may refuse some images; show it without.
+        except GLib.Error as e2:
+            print(f"twine-settings-host: notification failed: {e2}", file=sys.stderr)
+
+
+def withdraw_notification(notification_id):
+    if notification_bus is None:
+        return
+    from gi.repository import Gio, GLib
+    try:
+        notification_bus.call_sync(
+            PORTAL_NAME, PORTAL_PATH, NOTIFICATION_IFACE, "RemoveNotification",
+            GLib.Variant("(s)", (str(notification_id),)), None,
+            Gio.DBusCallFlags.NONE, 5000, None)
+    except GLib.Error:
+        pass
 
 
 def main():
@@ -372,16 +556,14 @@ def main():
     threading.Thread(target=watch_system_style, daemon=True).start()
     threading.Thread(target=watch_saved_appearance, daemon=True).start()
     threading.Thread(target=enforce_min_window_size, daemon=True).start()
+    threading.Thread(target=start_dbus, daemon=True).start()
 
     while True:
         msg = read_message()
         if msg is None:
             break  # Chromium closed the connection.
         if msg.get("command") == "set" and msg.get("appearance") in APPEARANCES:
-            os.makedirs(CONFIG_DIR, exist_ok=True)
-            with open(APPEARANCE_FILE, "w", encoding="utf-8") as f:
-                f.write(msg["appearance"] + "\n")
-            update(appearance=msg["appearance"])
+            save_appearance(msg["appearance"])
         elif msg.get("command") == "min-size":
             try:
                 width, height = int(msg["width"]), int(msg["height"])
@@ -400,6 +582,10 @@ def main():
                 threading.Thread(target=request_background, daemon=True).start()
         elif msg.get("command") in ("hide", "show"):
             set_window_visible(msg["command"] == "show")
+        elif msg.get("command") == "notify" and msg.get("id"):
+            notify(msg)
+        elif msg.get("command") == "withdraw-notification" and msg.get("id"):
+            withdraw_notification(msg["id"])
     if monitor is not None:
         monitor.terminate()
     os._exit(0)

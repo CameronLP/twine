@@ -72,6 +72,14 @@ write_native_host_manifest() {
 EOF
 }
 
+# Started by D-Bus activation (io.github.twinechat.Twine.service): GNOME wants
+# to talk to Twine, for example because a notification was clicked after
+# Twine quit. Start Twine as usual; once running, twine-settings-host owns the
+# bus name and answers GNOME's request.
+if [ "$1" = "--gapplication-service" ]; then
+    shift
+fi
+
 # Handle "--twine-appearance=…" (from the desktop actions).
 case "$1" in
 --twine-appearance=*)

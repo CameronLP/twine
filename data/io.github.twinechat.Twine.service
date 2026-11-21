@@ -1,0 +1,3 @@
+[D-BUS Service]
+Name=io.github.twinechat.Twine
+Exec=/app/bin/twine --gapplication-service
