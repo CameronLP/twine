@@ -35,6 +35,11 @@ desktop notifications.
   Settings, and opening Twine again brings the window back. Quit from the ☰
   menu, the right-click menu, Background Apps, or with Ctrl+Q. "Run in
   Background" can be switched off in the ☰ menu.
+- **Start at Login** (optional, off by default). Turn it on in the ☰ menu or
+  the right-click menu, and Twine starts hidden in Background Apps when you
+  log in.
+- **Keyboard shortcuts.** Ctrl+? (or Keyboard Shortcuts in the ☰ menu) opens
+  GNOME's shortcuts window.
 - **Stays logged in** between restarts.
 - **Snaps to half the screen.** LINE's layout is adjusted so the window fits
   GNOME's side-by-side tiling.
@@ -196,6 +201,20 @@ service workers whenever Flatpak's `app-commit` changes. LINE's data is kept.
   the Background portal; if GNOME denies it, or under
   `--ozone-platform=wayland`, where the window can't be hidden, closing quits.
   Quit closes every window and accepts the confirmation, so Chromium exits.
+- **Start at Login**: the helper's Background portal request also carries the
+  "Start at Login" choice, so GNOME adds or removes Twine from the login items
+  (`twine --twine-autostart`). Every request includes it, since one without it
+  would turn autostart off. Started at login, the launcher sets
+  `TWINE_START_HIDDEN`, and the window is hidden as soon as it can be (with
+  "Run in Background" on).
+- **Keyboard Shortcuts**: Ctrl+? opens libadwaita's own shortcuts dialog
+  (`AdwShortcutsDialog`) as a real GTK window, attached to Twine's window
+  like other GNOME modal dialogs. The helper runs `data/twine-shortcuts.py`.
+  GTK only marks windows as modal dialogs of its own windows, so once the
+  dialog is shown, the script waits until GNOME has taken it on, withdraws it,
+  gives it the properties of a modal dialog of Twine's window
+  (`WM_TRANSIENT_FOR`, `_NET_WM_WINDOW_TYPE_DIALOG`, `_NET_WM_STATE_MODAL`),
+  and maps it again. GNOME then attaches it ("attach-modal-dialogs").
 - **Profile**: Chromium uses a private profile in
   `~/.var/app/io.github.twinechat.Twine/config/chromium`.
 - **Staying logged in**: LINE's login session is a cookie without an expiry

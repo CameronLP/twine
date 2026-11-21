@@ -1,6 +1,7 @@
 // Twine: a ☰ menu in LINE's sidebar, with the appearance (Follow System /
-// Light / Dark), zoom, "Run in Background" and Quit, which are also in the
-// right-click menu. It also handles Ctrl+Q (Quit), as in other GNOME apps.
+// Light / Dark), zoom, "Run in Background", "Start at Login" and Quit, which
+// are also in the right-click menu, and Keyboard Shortcuts. It also handles
+// Ctrl+Q (Quit) and Ctrl+? (Keyboard Shortcuts), as in other GNOME apps.
 //
 // The window's title bar is drawn by GNOME's window manager, so Twine can't put
 // buttons in it. The menu button sits in LINE's dark-blue sidebar instead, at
@@ -88,8 +89,9 @@
     .switch-row[aria-checked="true"] .switch { background: #06c755; }
     .switch-row[aria-checked="true"] .switch::after { transform: translateX(18px); }
     .switch-row:disabled { opacity: 0.4; cursor: default; }
-    .quit { width: 100%; height: 34px; border-radius: 8px; justify-content: flex-start; padding: 0 2px; }
-    .quit:hover { background: rgba(0, 0, 0, 0.05); }
+    .item { width: 100%; height: 34px; border-radius: 8px; justify-content: flex-start; padding: 0 2px; }
+    .item:hover { background: rgba(0, 0, 0, 0.05); }
+
   `;
 
   function build() {
@@ -115,11 +117,17 @@
             <button data-zoom="in" title="Zoom In (Ctrl++)" aria-label="Zoom In">${icon("plus")}</button>
           </div>
           <div class="separator"></div>
-          <button class="switch-row" role="switch" aria-checked="false">
+          <button class="switch-row background" role="switch" aria-checked="false">
             <span class="text"><span>Run in Background</span><span class="note"></span></span>
             <span class="switch" aria-hidden="true"></span>
           </button>
-          <button class="quit" title="Quit (Ctrl+Q)">Quit</button>
+          <button class="switch-row autostart" role="switch" aria-checked="false">
+            <span class="text"><span>Start at Login</span><span class="note"></span></span>
+            <span class="switch" aria-hidden="true"></span>
+          </button>
+          <div class="separator"></div>
+          <button class="item shortcuts" title="Keyboard Shortcuts (Ctrl+?)">Keyboard Shortcuts</button>
+          <button class="item quit" title="Quit (Ctrl+Q)">Quit</button>
         </div>
       </div>`;
 
@@ -153,9 +161,17 @@
       button.addEventListener("click", () =>
         chrome.runtime.sendMessage(`twine:appearance:${button.dataset.appearance}`).catch(() => {}))
     );
-    // "Run in Background" and Quit (see twine-bg.js, "Running in the background").
-    const backgroundSwitch = root.querySelector(".switch-row");
-    const backgroundNote = root.querySelector(".switch-row .note");
+    // Keyboard Shortcuts: libadwaita's shortcuts dialog, a real GTK window that
+    // twine-settings-host opens (twine-shortcuts).
+    const showShortcuts = () => {
+      setOpen(false);
+      chrome.runtime.sendMessage("twine:shortcuts").catch(() => {});
+    };
+    root.querySelector(".item.shortcuts").addEventListener("click", showShortcuts);
+
+    // "Run in Background", "Start at Login" and Quit (see twine-bg.js).
+    const backgroundSwitch = root.querySelector(".switch-row.background");
+    const backgroundNote = root.querySelector(".switch-row.background .note");
     backgroundSwitch.addEventListener("click", () => {
       const on = backgroundSwitch.getAttribute("aria-checked") !== "true";
       chrome.runtime.sendMessage(`twine:background:${on ? "on" : "off"}`).catch(() => {});
@@ -169,18 +185,34 @@
           ? "Not allowed in GNOME Settings"
           : "";
     };
-    chrome.storage.session.get("twineBackground", ({ twineBackground }) => showBackground(twineBackground));
+    const autostartSwitch = root.querySelector(".switch-row.autostart");
+    autostartSwitch.addEventListener("click", () => {
+      const on = autostartSwitch.getAttribute("aria-checked") !== "true";
+      chrome.runtime.sendMessage(`twine:autostart:${on ? "on" : "off"}`).catch(() => {});
+    });
+    const showAutostart = ({ enabled = false } = {}) =>
+      autostartSwitch.setAttribute("aria-checked", String(enabled));
+    chrome.storage.session.get(["twineBackground", "twineAutostart"], (values) => {
+      showBackground(values.twineBackground);
+      showAutostart(values.twineAutostart);
+    });
     chrome.storage.onChanged.addListener((changes, area) => {
-      if (area === "session" && changes.twineBackground) showBackground(changes.twineBackground.newValue);
+      if (area !== "session") return;
+      if (changes.twineBackground) showBackground(changes.twineBackground.newValue);
+      if (changes.twineAutostart) showAutostart(changes.twineAutostart.newValue);
     });
     const quit = () => chrome.runtime.sendMessage("twine:quit").catch(() => {});
-    root.querySelector(".quit").addEventListener("click", quit);
-    // Ctrl+Q quits, as in other GNOME apps. (Ctrl+W closes the window, which
-    // Chromium already does.)
+    root.querySelector(".item.quit").addEventListener("click", quit);
+    // Ctrl+Q quits and Ctrl+? shows the shortcuts, as in other GNOME apps.
+    // (Ctrl+W closes the window, which Chromium already does.)
     document.addEventListener("keydown", (e) => {
-      if (e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey && e.key.toLowerCase() === "q") {
+      if (!e.ctrlKey || e.altKey || e.metaKey) return;
+      if (!e.shiftKey && e.key.toLowerCase() === "q") {
         e.preventDefault();
         quit();
+      } else if (e.key === "?") {
+        e.preventDefault();
+        showShortcuts();
       }
     }, true);
 

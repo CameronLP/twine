@@ -9,7 +9,8 @@ by UTF-8 JSON.
 To the worker, sent at start and whenever something changes:
     {"appearance": "system" | "light" | "dark", "systemDark": true | false,
      "background": true | false, "canHide": true | false,
-     "backgroundAllowed": true | false | null, "portalNotifications": true | false}
+     "backgroundAllowed": true | false | null, "portalNotifications": true | false,
+     "autostart": true | false, "startHidden": true | false}
   "appearance" is Twine's saved choice ($XDG_CONFIG_HOME/twine/appearance,
   which the dock-menu actions also write). "systemDark" is GNOME's light/dark
   style, watched live through the settings portal. "background" is the saved
@@ -18,7 +19,10 @@ To the worker, sent at start and whenever something changes:
   window on X11, so it can hide and show it. "backgroundAllowed" is GNOME's
   answer to Twine's background permission request (null until it answers,
   or when there is no background portal). "portalNotifications" is true when
-  GNOME's notification portal can be used.
+  GNOME's notification portal can be used. "autostart" is the saved "Start at
+  Login" setting ($XDG_CONFIG_HOME/twine/autostart, off unless it says "on").
+  "startHidden" is true when GNOME started Twine at login, so the window should
+  start hidden (TWINE_START_HIDDEN, set by the launcher).
     {"event": "notification-clicked", "id": "..."}
   is sent when one of Twine's notifications is clicked, and
     {"event": "activate"} / {"event": "quit"}
@@ -31,7 +35,12 @@ From the worker:
                                                size, in logical pixels
     {"command": "set-background", "enabled": true}
                                                saves "Run in Background"
+    {"command": "set-autostart", "enabled": true}
+                                               saves "Start at Login"
     {"command": "hide"} / {"command": "show"}  hides or shows the main window
+    {"command": "show-shortcuts", "style": "default" | "light" | "dark"}
+                                               opens the Keyboard Shortcuts
+                                               window (twine-shortcuts)
     {"command": "notify", "id": "...", "title": "...", "body": "...",
      "icon": "<base64 image>" | null}          shows (or replaces) a notification
     {"command": "withdraw-notification", "id": "..."}
@@ -53,6 +62,7 @@ CONFIG_DIR = os.path.join(
 APPEARANCE_FILE = os.path.join(CONFIG_DIR, "appearance")
 APPEARANCES = ("system", "light", "dark")
 BACKGROUND_FILE = os.path.join(CONFIG_DIR, "background")
+AUTOSTART_FILE = os.path.join(CONFIG_DIR, "autostart")
 PORTAL = ["--session", "--dest", "org.freedesktop.portal.Desktop",
           "--object-path", "/org/freedesktop/portal/desktop"]
 
@@ -60,7 +70,8 @@ send_lock = threading.Lock()
 state_lock = threading.Lock()
 state = {"appearance": None, "systemDark": None,
          "background": None, "canHide": False, "backgroundAllowed": None,
-         "portalNotifications": False}
+         "portalNotifications": False, "autostart": None,
+         "startHidden": os.environ.get("TWINE_START_HIDDEN") == "1"}
 monitor = None  # the "gdbus monitor" child process
 
 
@@ -94,6 +105,14 @@ def saved_background():
             return f.read().strip() != "off"
     except OSError:
         return True  # On by default.
+
+
+def saved_autostart():
+    try:
+        with open(AUTOSTART_FILE, encoding="utf-8") as f:
+            return f.read().strip() == "on"
+    except OSError:
+        return False  # Off by default.
 
 
 def read_system_dark():
@@ -261,7 +280,7 @@ def enforce_min_window_size():
             if main_window != window:
                 main_window = window
                 update(canHide=True)
-                if state["background"]:
+                if state["background"] or state["autostart"]:
                     threading.Thread(target=request_background, daemon=True).start()
             hints, supplied = XSizeHints(), c_long()
             x.XGetWMNormalHints(display, window, byref(hints), byref(supplied))
@@ -293,6 +312,12 @@ def enforce_min_window_size():
 # Background portal, the way GNOME apps do. GNOME asks the user the first time
 # and remembers the answer (Settings → Apps → Twine). If it's denied, the
 # worker lets the window close (and Twine quit) instead of hiding it.
+#
+# The same request also sets "Start at Login": with autostart, GNOME adds
+# Twine to the login items, started as "twine --twine-autostart", and without
+# it removes Twine again. So every request carries the saved choice; a request
+# without it would turn autostart off. Started at login, Twine starts hidden
+# when "Run in Background" is on, so no window opens at login.
 # ---------------------------------------------------------------------------
 command_display = None  # The main thread's X11 connection, for hide/show.
 
@@ -327,7 +352,8 @@ background_requested = threading.Lock()
 
 def request_background():
     """Ask GNOME, through the Background portal, to let Twine keep running
-    without a window, and report the answer as "backgroundAllowed"."""
+    without a window (and to start it at login, if chosen), and report the
+    answer as "backgroundAllowed" and "autostart"."""
     if not background_requested.acquire(blocking=False):
         return  # A request is already waiting for an answer.
     try:
@@ -350,14 +376,20 @@ def request_background():
         def on_response(connection, sender_name, object_path, interface, signal, params):
             code, results = params.unpack()
             update(backgroundAllowed=code == 0 and bool(results.get("background")))
+            if code == 0 and want_autostart and not results.get("autostart"):
+                print("twine-settings-host: GNOME didn't allow starting at login", file=sys.stderr)
             loop.quit()
 
         subscription = bus.signal_subscribe(
             "org.freedesktop.portal.Desktop", "org.freedesktop.portal.Request", "Response",
             path, None, Gio.DBusSignalFlags.NONE, on_response)
+        want_autostart = saved_autostart()
         options = {
             "handle_token": GLib.Variant("s", token),
             "reason": GLib.Variant("s", "To keep receiving LINE messages after you close the window"),
+            "autostart": GLib.Variant("b", want_autostart),
+            "commandline": GLib.Variant("as", ["twine", "--twine-autostart"]),
+            "dbus-activatable": GLib.Variant("b", False),
         }
         parent = f"x11:{main_window:x}" if main_window else ""
         try:
@@ -549,10 +581,30 @@ def withdraw_notification(notification_id):
         pass
 
 
+# The Keyboard Shortcuts window: libadwaita's shortcuts dialog, a real GTK
+# window run by /app/libexec/twine-shortcuts, attached to Twine's window.
+shortcuts_process = None
+
+
+def show_shortcuts(style):
+    global shortcuts_process
+    if shortcuts_process is not None and shortcuts_process.poll() is None:
+        return  # Already open.
+    command = ["python3", "/app/libexec/twine-shortcuts",
+               "--style", style if style in ("default", "light", "dark") else "default"]
+    if main_window:
+        command += ["--parent", hex(main_window)]
+    try:
+        shortcuts_process = subprocess.Popen(command, stdin=subprocess.DEVNULL,
+                                             stdout=subprocess.DEVNULL)
+    except OSError as e:
+        print(f"twine-settings-host: can't open the shortcuts window: {e}", file=sys.stderr)
+
+
 def main():
     global min_size
     update(appearance=saved_appearance(), systemDark=read_system_dark(),
-           background=saved_background())
+           background=saved_background(), autostart=saved_autostart())
     threading.Thread(target=watch_system_style, daemon=True).start()
     threading.Thread(target=watch_saved_appearance, daemon=True).start()
     threading.Thread(target=enforce_min_window_size, daemon=True).start()
@@ -580,8 +632,18 @@ def main():
             update(background=enabled)
             if enabled:
                 threading.Thread(target=request_background, daemon=True).start()
+        elif msg.get("command") == "set-autostart":
+            enabled = bool(msg.get("enabled"))
+            os.makedirs(CONFIG_DIR, exist_ok=True)
+            with open(AUTOSTART_FILE, "w", encoding="utf-8") as f:
+                f.write(("on" if enabled else "off") + "\n")
+            update(autostart=enabled)
+            # Adds or removes Twine from GNOME's login items.
+            threading.Thread(target=request_background, daemon=True).start()
         elif msg.get("command") in ("hide", "show"):
             set_window_visible(msg["command"] == "show")
+        elif msg.get("command") == "show-shortcuts":
+            show_shortcuts(msg.get("style"))
         elif msg.get("command") == "notify" and msg.get("id"):
             notify(msg)
         elif msg.get("command") == "withdraw-notification" and msg.get("id"):

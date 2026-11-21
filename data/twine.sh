@@ -80,6 +80,16 @@ if [ "$1" = "--gapplication-service" ]; then
     shift
 fi
 
+# Started at login ("Start at Login", set up through the Background portal by
+# twine-settings-host). Start with the window hidden; the helper passes this
+# on to the bootstrap worker. If Twine is already running, there's nothing to
+# do.
+if [ "$1" = "--twine-autostart" ]; then
+    shift
+    is_running && exit 0
+    export TWINE_START_HIDDEN=1
+fi
+
 # Handle "--twine-appearance=…" (from the desktop actions).
 case "$1" in
 --twine-appearance=*)

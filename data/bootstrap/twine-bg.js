@@ -70,7 +70,9 @@ async function focusMainWindow() {
 //   twine:appearance:<v>    the ☰ menu (twine-menu.js) picked an appearance
 //   twine:zoom:<in|out|reset>  the ☰ menu changed the zoom
 //   twine:background:<on|off>  the ☰ menu changed "Run in Background"
+//   twine:autostart:<on|off>   the ☰ menu changed "Start at Login"
 //   twine:quit              the ☰ menu's Quit, or Ctrl+Q (twine-menu.js)
+//   twine:shortcuts         Keyboard Shortcuts, or Ctrl+? (twine-menu.js)
 chrome.runtime.onMessage.addListener((msg, sender) => {
   // LINE's notifications, from twine-notifications.js (see "Notifications").
   if (msg?.twineNotification) {
@@ -93,8 +95,16 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
     zoom(sender.tab.id, value);
   } else if (kind === "background") {
     setBackground(value === "on");
+  } else if (kind === "autostart") {
+    setAutostart(value === "on");
   } else if (kind === "quit") {
     quit();
+  } else if (kind === "shortcuts") {
+    // libadwaita's shortcuts dialog, opened by the helper as a GTK window.
+    settingsPort?.postMessage({
+      command: "show-shortcuts",
+      style: appearance.appearance === "system" ? "default" : appearance.appearance,
+    });
   }
 });
 
@@ -351,6 +361,13 @@ function setUpMenu() {
       enabled: Boolean(appearance.canHide),
       contexts: ["all"],
     });
+    chrome.contextMenus.create({
+      id: "twine-autostart",
+      title: "Start at Login",
+      type: "checkbox",
+      checked: Boolean(appearance.autostart),
+      contexts: ["all"],
+    });
     chrome.contextMenus.create({ id: "twine-quit", title: "Quit", contexts: ["all"] });
     chrome.tabs.query({}, (tabs) => {
       const tab = tabs.find((t) => (t.url || "").startsWith(MAIN_URL));
@@ -394,6 +411,8 @@ function connectSettings() {
       { checked: Boolean(msg.background), enabled: Boolean(msg.canHide) },
       () => void chrome.runtime.lastError,
     );
+    chrome.contextMenus.update("twine-autostart", { checked: Boolean(msg.autostart) }, () => void chrome.runtime.lastError);
+    startHiddenIfAsked();
     // The ☰ menu (twine-menu.js) watches these keys to show the current state.
     chrome.storage.session.set({
       twinePortalNotifications: Boolean(msg.portalNotifications),
@@ -403,6 +422,7 @@ function connectSettings() {
         available: Boolean(msg.canHide),
         allowed: msg.backgroundAllowed !== false,
       },
+      twineAutostart: { enabled: Boolean(msg.autostart) },
     });
     applyToAllTabs();
   });
@@ -420,6 +440,7 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (id.startsWith(MENU_PREFIX)) setAppearance(id.slice(MENU_PREFIX.length));
   else if (id.startsWith("twine-zoom-") && tab) zoom(tab.id, id.slice("twine-zoom-".length));
   else if (id === "twine-background") setBackground(info.checked);
+  else if (id === "twine-autostart") setAutostart(info.checked);
   else if (id === "twine-quit") quit();
 });
 
@@ -445,6 +466,24 @@ const runInBackground = () =>
 
 function setBackground(enabled) {
   settingsPort?.postMessage({ command: "set-background", enabled: Boolean(enabled) });
+}
+
+// "Start at Login" (off by default). twine-settings-host asks GNOME, through
+// the Background portal, to add or remove Twine from the login items. Started
+// at login, the helper reports startHidden, and the window is hidden as soon
+// as it can be, so Twine starts in Background Apps without opening a window.
+// Without "Run in Background", it starts with its window, as usual.
+function setAutostart(enabled) {
+  settingsPort?.postMessage({ command: "set-autostart", enabled: Boolean(enabled) });
+}
+
+async function startHiddenIfAsked() {
+  if (!appearance.startHidden || !runInBackground()) return;
+  const { twineStartedHidden } = await chrome.storage.session.get("twineStartedHidden");
+  if (twineStartedHidden) return; // Only once, at startup.
+  await chrome.storage.session.set({ twineStartedHidden: true });
+  await started;
+  hideMainWindow();
 }
 
 // twineHidden in chrome.storage.session tells LINE's page (twine-notifications.js)
