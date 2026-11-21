@@ -198,5 +198,7 @@ tools/update-sources.sh            Re-pins the extension and Chromium hashes
 
 ## License
 
-The wrapper code in this repository is under the MIT license (see `LICENSE`).
-LINE and Chromium have their own licenses.
+The code in this repository is licensed under the GNU General Public License
+v3.0 or later (see `LICENSE`). The LINE extension and Chromium, which are
+downloaded at build time, are not covered by this license and keep their own
+licenses.
