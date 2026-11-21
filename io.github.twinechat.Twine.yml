@@ -45,7 +45,7 @@ modules:
       - install -Dm755 twine.sh /app/bin/twine
       - install -Dm755 twine-prefs.py /app/libexec/twine-prefs.py
       - install -Dm755 twine-settings-host.py /app/libexec/twine-settings-host
-      - install -Dm755 twine-shortcuts.py /app/libexec/twine-shortcuts
+      - install -Dm755 twine-dialogs.py /app/libexec/twine-dialogs
       - install -Dm644 ${FLATPAK_ID}.desktop -t /app/share/applications/
       # D-Bus activation (see twine-settings-host): GNOME starts Twine through
       # the bus, e.g. when a notification is clicked after Twine has quit.
@@ -67,7 +67,7 @@ modules:
       - type: file
         path: data/twine-settings-host.py
       - type: file
-        path: data/twine-shortcuts.py
+        path: data/twine-dialogs.py
       - type: file
         path: data/splash.html
       - type: dir

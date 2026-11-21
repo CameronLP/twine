@@ -40,6 +40,8 @@ desktop notifications.
   log in.
 - **Keyboard shortcuts.** Ctrl+? (or Keyboard Shortcuts in the ☰ menu) opens
   GNOME's shortcuts window.
+- **About Twine** (in the ☰ menu and the right-click menu) says what Twine is:
+  an unofficial desktop app for LINE, not made or endorsed by LY Corporation.
 - **Stays logged in** between restarts.
 - **Snaps to half the screen.** LINE's layout is adjusted so the window fits
   GNOME's side-by-side tiling.
@@ -221,9 +223,10 @@ service workers whenever Flatpak's `app-commit` changes. LINE's data is kept.
   would turn autostart off. Started at login, the launcher sets
   `TWINE_START_HIDDEN`, and the window is hidden as soon as it can be (with
   "Run in Background" on).
-- **Keyboard Shortcuts**: Ctrl+? opens libadwaita's own shortcuts dialog
-  (`AdwShortcutsDialog`) as a real GTK window, attached to Twine's window
-  like other GNOME modal dialogs. The helper runs `data/twine-shortcuts.py`.
+- **Keyboard Shortcuts and About Twine**: Ctrl+? opens libadwaita's own
+  shortcuts dialog (`AdwShortcutsDialog`), and About Twine its about dialog
+  (`AdwAboutDialog`), as real GTK windows, attached to Twine's window
+  like other GNOME modal dialogs. The helper runs `data/twine-dialogs.py`.
   GTK only marks windows as modal dialogs of its own windows, so once the
   dialog is shown, the script waits until GNOME has taken it on, withdraws it,
   gives it the properties of a modal dialog of Twine's window

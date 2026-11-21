@@ -73,6 +73,7 @@ async function focusMainWindow() {
 //   twine:autostart:<on|off>   the ☰ menu changed "Start at Login"
 //   twine:quit              the ☰ menu's Quit, or Ctrl+Q (twine-menu.js)
 //   twine:shortcuts         Keyboard Shortcuts, or Ctrl+? (twine-menu.js)
+//   twine:about             About Twine (twine-menu.js)
 chrome.runtime.onMessage.addListener((msg, sender) => {
   // LINE's notifications, from twine-notifications.js (see "Notifications").
   if (msg?.twineNotification) {
@@ -99,12 +100,8 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
     setAutostart(value === "on");
   } else if (kind === "quit") {
     quit();
-  } else if (kind === "shortcuts") {
-    // libadwaita's shortcuts dialog, opened by the helper as a GTK window.
-    settingsPort?.postMessage({
-      command: "show-shortcuts",
-      style: appearance.appearance === "system" ? "default" : appearance.appearance,
-    });
+  } else if (kind === "shortcuts" || kind === "about") {
+    showDialog(kind);
   }
 });
 
@@ -454,6 +451,9 @@ function setUpMenu() {
       checked: Boolean(appearance.autostart),
       contexts: ["all"],
     });
+    chrome.contextMenus.create({ id: "twine-separator-3", type: "separator", contexts: ["all"] });
+    chrome.contextMenus.create({ id: "twine-shortcuts", title: "Keyboard Shortcuts", contexts: ["all"] });
+    chrome.contextMenus.create({ id: "twine-about", title: "About Twine", contexts: ["all"] });
     chrome.contextMenus.create({ id: "twine-quit", title: "Quit", contexts: ["all"] });
     chrome.tabs.query({}, (tabs) => {
       const tab = tabs.find((t) => (t.url || "").startsWith(MAIN_URL));
@@ -528,6 +528,8 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   else if (id === "twine-background") setBackground(info.checked);
   else if (id === "twine-autostart") setAutostart(info.checked);
   else if (id === "twine-quit") quit();
+  else if (id === "twine-shortcuts") showDialog("shortcuts");
+  else if (id === "twine-about") showDialog("about");
 });
 
 // ---------------------------------------------------------------------------
@@ -549,6 +551,16 @@ let windowHidden = false;
 
 const runInBackground = () =>
   Boolean(appearance.background && appearance.canHide && appearance.backgroundAllowed !== false);
+
+// Keyboard Shortcuts and About Twine: libadwaita's own dialogs, opened by the
+// helper as GTK windows attached to Twine's window (twine-dialogs).
+function showDialog(dialog) {
+  settingsPort?.postMessage({
+    command: "show-dialog",
+    dialog,
+    style: appearance.appearance === "system" ? "default" : appearance.appearance,
+  });
+}
 
 function setBackground(enabled) {
   settingsPort?.postMessage({ command: "set-background", enabled: Boolean(enabled) });

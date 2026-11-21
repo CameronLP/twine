@@ -1,9 +1,12 @@
 #!/usr/bin/python3
-"""Twine's Keyboard Shortcuts window: libadwaita's own shortcuts dialog
-(AdwShortcutsDialog), the one GNOME apps show for Ctrl+?.
+"""Twine's dialogs, as libadwaita's own dialogs, like other GNOME apps:
 
-twine-settings-host starts it when Ctrl+? is pressed in Twine or Keyboard
-Shortcuts is chosen in the ☰ menu. The dialog is a real GTK window, in Twine's
+  shortcuts  Keyboard Shortcuts (AdwShortcutsDialog): Ctrl+?, or the menus
+  about      About Twine (AdwAboutDialog): the menus. Says what Twine is (an
+             unofficial desktop app for LINE) and that it isn't made or
+             endorsed by LY Corporation.
+
+twine-settings-host starts it. The dialog is a real GTK window, in Twine's
 light or dark style, attached to Twine's window like any GNOME modal dialog.
 GTK only knows its own windows, so the X11 properties that make it a modal
 dialog of Twine's window are set here (see make_modal_dialog_of). GNOME then
@@ -11,9 +14,10 @@ attaches it to
 Twine's window (the "attach-modal-dialogs" setting): it opens from the top of
 that window, moves with it, and dims it.
 
-Usage: twine-shortcuts [--parent XID] [--style default|light|dark]
+Usage: twine-dialogs shortcuts|about [--parent XID] [--style default|light|dark]
 """
 import argparse
+import re
 import warnings
 
 import gi
@@ -26,6 +30,13 @@ APP_ID = "io.github.twinechat.Twine"
 
 # The X11 window class, so GNOME shows the window as Twine's (not "python3").
 GLib.set_prgname(APP_ID)
+
+METAINFO = f"/app/share/metainfo/{APP_ID}.metainfo.xml"
+WEBSITE = "https://github.com/CameronLP/twine"
+LEGAL_NOTE = ("LINE is a trademark of LY Corporation. Twine is not made, endorsed or "
+              "supported by LY Corporation. Twine runs LINE's official Chrome extension, "
+              "which is downloaded from the Chrome Web Store when Twine is built; "
+              "LINE's own terms of use apply to it.")
 
 # [section, [(title, accelerator)]]
 SHORTCUTS = [
@@ -128,8 +139,44 @@ def make_modal_dialog_of(window, parent_xid):
     x.XCloseDisplay(display)
 
 
+def twine_version():
+    """The newest release in Twine's AppStream metadata."""
+    try:
+        with open(METAINFO, encoding="utf-8") as f:
+            match = re.search(r'<release[^>]*version="([^"]+)"', f.read())
+        return match.group(1) if match else ""
+    except OSError:
+        return ""
+
+
+def shortcuts_dialog():
+    dialog = Adw.ShortcutsDialog()
+    for title, items in SHORTCUTS:
+        section = Adw.ShortcutsSection(title=title)
+        for item_title, accelerator in items:
+            section.add(Adw.ShortcutsItem(title=item_title, accelerator=accelerator))
+        dialog.add(section)
+    return dialog
+
+
+def about_dialog():
+    dialog = Adw.AboutDialog(
+        application_name="Twine",
+        application_icon=APP_ID,
+        developer_name="Twine contributors",
+        version=twine_version(),
+        comments="Unofficial desktop app for LINE.",
+        website=WEBSITE,
+        issue_url=f"{WEBSITE}/issues",
+        license_type=Gtk.License.GPL_3_0,
+    )
+    dialog.add_legal_section("LINE", None, Gtk.License.CUSTOM, LEGAL_NOTE)
+    return dialog
+
+
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument("dialog", choices=("shortcuts", "about"))
     parser.add_argument("--parent", type=lambda value: int(value, 0), default=0)
     parser.add_argument("--style", choices=("default", "light", "dark"), default="default")
     args = parser.parse_args()
@@ -146,12 +193,7 @@ def main():
             "dark": Adw.ColorScheme.FORCE_DARK,
         }.get(args.style, Adw.ColorScheme.DEFAULT))
 
-        dialog = Adw.ShortcutsDialog()
-        for title, items in SHORTCUTS:
-            section = Adw.ShortcutsSection(title=title)
-            for item_title, accelerator in items:
-                section.add(Adw.ShortcutsItem(title=item_title, accelerator=accelerator))
-            dialog.add(section)
+        dialog = shortcuts_dialog() if args.dialog == "shortcuts" else about_dialog()
 
         app.hold()  # The dialog's own window isn't one of the app's windows.
         dialog.connect("closed", lambda *_: app.release())

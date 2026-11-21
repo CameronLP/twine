@@ -38,9 +38,9 @@ From the worker:
     {"command": "set-autostart", "enabled": true}
                                                saves "Start at Login"
     {"command": "hide"} / {"command": "show"}  hides or shows the main window
-    {"command": "show-shortcuts", "style": "default" | "light" | "dark"}
-                                               opens the Keyboard Shortcuts
-                                               window (twine-shortcuts)
+    {"command": "show-dialog", "dialog": "shortcuts" | "about",
+     "style": "default" | "light" | "dark"}    opens Keyboard Shortcuts or About
+                                               Twine (twine-dialogs)
     {"command": "notify", "id": "...", "title": "...", "body": "...",
      "icon": "<base64 image>" | null}          shows (or replaces) a notification
     {"command": "withdraw-notification", "id": "..."}
@@ -603,24 +603,27 @@ def withdraw_notification(notification_id):
         pass
 
 
-# The Keyboard Shortcuts window: libadwaita's shortcuts dialog, a real GTK
-# window run by /app/libexec/twine-shortcuts, attached to Twine's window.
-shortcuts_process = None
+# Twine's dialogs (Keyboard Shortcuts, About Twine): libadwaita's own dialogs,
+# real GTK windows run by /app/libexec/twine-dialogs, attached to Twine's
+# window. One of each at a time.
+dialog_processes = {}
 
 
-def show_shortcuts(style):
-    global shortcuts_process
-    if shortcuts_process is not None and shortcuts_process.poll() is None:
+def show_dialog(kind, style):
+    if kind not in ("shortcuts", "about"):
+        return
+    process = dialog_processes.get(kind)
+    if process is not None and process.poll() is None:
         return  # Already open.
-    command = ["python3", "/app/libexec/twine-shortcuts",
+    command = ["python3", "/app/libexec/twine-dialogs", kind,
                "--style", style if style in ("default", "light", "dark") else "default"]
     if main_window:
         command += ["--parent", hex(main_window)]
     try:
-        shortcuts_process = subprocess.Popen(command, stdin=subprocess.DEVNULL,
-                                             stdout=subprocess.DEVNULL)
+        dialog_processes[kind] = subprocess.Popen(command, stdin=subprocess.DEVNULL,
+                                                  stdout=subprocess.DEVNULL)
     except OSError as e:
-        print(f"twine-settings-host: can't open the shortcuts window: {e}", file=sys.stderr)
+        print(f"twine-settings-host: can't open the {kind} dialog: {e}", file=sys.stderr)
 
 
 def main():
@@ -664,8 +667,8 @@ def main():
             threading.Thread(target=request_background, daemon=True).start()
         elif msg.get("command") in ("hide", "show"):
             set_window_visible(msg["command"] == "show")
-        elif msg.get("command") == "show-shortcuts":
-            show_shortcuts(msg.get("style"))
+        elif msg.get("command") == "show-dialog":
+            show_dialog(msg.get("dialog"), msg.get("style"))
         elif msg.get("command") == "notify" and msg.get("id"):
             notify(msg)
         elif msg.get("command") == "withdraw-notification" and msg.get("id"):

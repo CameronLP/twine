@@ -16,6 +16,8 @@
       app is built.
     </p>
   </description>
+  <url type="homepage">https://github.com/CameronLP/twine</url>
+  <url type="bugtracker">https://github.com/CameronLP/twine/issues</url>
   <launchable type="desktop-id">io.github.twinechat.Twine.desktop</launchable>
   <categories>
     <category>Network</category>

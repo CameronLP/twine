@@ -2,7 +2,7 @@
 Type=Application
 Name=Twine
 GenericName=Messenger
-Comment=Chat with your friends
+Comment=Unofficial desktop app for LINE
 Exec=twine %U
 Icon=io.github.twinechat.Twine
 Terminal=false

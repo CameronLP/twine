@@ -1,7 +1,8 @@
 // Twine: a ☰ menu in LINE's sidebar, with the appearance (Follow System /
-// Light / Dark), zoom, "Run in Background", "Start at Login" and Quit, which
-// are also in the right-click menu, and Keyboard Shortcuts. It also handles
-// Ctrl+Q (Quit) and Ctrl+? (Keyboard Shortcuts), as in other GNOME apps.
+// Light / Dark), zoom, "Run in Background", "Start at Login", Keyboard
+// Shortcuts, About Twine and Quit, which are also in the right-click menu. It
+// also handles Ctrl+Q (Quit) and Ctrl+? (Keyboard Shortcuts), as in other
+// GNOME apps.
 //
 // The window's title bar is drawn by GNOME's window manager, so Twine can't put
 // buttons in it. The menu button sits in LINE's dark-blue sidebar instead, at
@@ -127,6 +128,7 @@
           </button>
           <div class="separator"></div>
           <button class="item shortcuts" title="Keyboard Shortcuts (Ctrl+?)">Keyboard Shortcuts</button>
+          <button class="item about">About Twine</button>
           <button class="item quit" title="Quit (Ctrl+Q)">Quit</button>
         </div>
       </div>`;
@@ -161,13 +163,17 @@
       button.addEventListener("click", () =>
         chrome.runtime.sendMessage(`twine:appearance:${button.dataset.appearance}`).catch(() => {}))
     );
-    // Keyboard Shortcuts: libadwaita's shortcuts dialog, a real GTK window that
-    // twine-settings-host opens (twine-shortcuts).
+    // Keyboard Shortcuts and About Twine: libadwaita's own dialogs, real GTK
+    // windows that twine-settings-host opens (twine-dialogs).
     const showShortcuts = () => {
       setOpen(false);
       chrome.runtime.sendMessage("twine:shortcuts").catch(() => {});
     };
     root.querySelector(".item.shortcuts").addEventListener("click", showShortcuts);
+    root.querySelector(".item.about").addEventListener("click", () => {
+      setOpen(false);
+      chrome.runtime.sendMessage("twine:about").catch(() => {});
+    });
 
     // "Run in Background", "Start at Login" and Quit (see twine-bg.js).
     const backgroundSwitch = root.querySelector(".switch-row.background");
