@@ -140,6 +140,12 @@ service workers whenever Flatpak's `app-commit` changes. LINE's data is kept.
   Twine's name and icon, and points `TMPDIR` at a directory GNOME can read, so
   sender pictures show up. Notifications only arrive while Twine is running:
   closing the window quits it.
+- **Do Not Disturb**: LINE creates every notification with
+  `requireInteraction: true`. Chromium sends those to GNOME as *critical*
+  notifications, which GNOME shows even during Do Not Disturb.
+  `data/bootstrap/twine-notifications.js` removes that option before LINE's
+  code runs, so Chromium sends normal notifications and GNOME hides them
+  during Do Not Disturb, as it does for other apps.
 - **Closing the window**: LINE's page always asks Chromium for a "Leave
   site?" confirmation when it is closed, even with nothing unsaved. Through
   its debugger session the bootstrap worker accepts that one confirmation
