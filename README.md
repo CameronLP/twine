@@ -1,6 +1,10 @@
-# Twine
+<p align="center">
+  <img src="data/io.github.twinechat.Twine.svg" width="128" height="128" alt="Twine icon">
+</p>
 
-*Chat on LINE from your GNOME desktop.*
+<h1 align="center">Twine</h1>
+
+<p align="center"><em>Chat on LINE from your GNOME desktop.</em></p>
 
 Twine is an unofficial Flatpak app that runs the official
 [LINE Chrome extension](https://chromewebstore.google.com/detail/line/ophjlpahpchlmihnnnihgmmeilfjmjjc)
