@@ -45,6 +45,9 @@ From the worker:
      "icon": "<base64 image>" | null}          shows (or replaces) a notification
     {"command": "withdraw-notification", "id": "..."}
                                                removes one
+    {"command": "notify-download", "id": "...", "path": "..."}
+                                               says a download finished
+                                               (see "Downloads")
 
 The helper exits when Chromium closes the connection.
 """
@@ -599,6 +602,14 @@ def on_application_call(connection, sender, path, interface, method, params, inv
         complete_startup(params.unpack()[-1])
     elif method == "ActivateAction":
         action, parameter, platform_data = params.unpack()
+        if action == "show-download":
+            # A "Download complete" notification (notify_download); the
+            # target is the file's path. The click's activation token goes to
+            # the file manager, which opens the window, instead of ending it
+            # here: without it, GNOME opens the folder behind Twine.
+            show_download(str(parameter[0]) if parameter else "", platform_data)
+            invocation.return_value(None)
+            return
         complete_startup(platform_data)
         if action == "open-chat":
             # The notification's ID, from its default-action-target.
@@ -645,7 +656,15 @@ def start_dbus():
         # Clicks are reported to Twine as ActivateAction("open-chat") (above)
         # or, by some portal versions, with this signal.
         def on_action(connection, sender, path, interface, signal, params):
-            send_message({"event": "notification-clicked", "id": params.unpack()[0]})
+            notification_id = params.unpack()[0]
+            if notification_id in download_paths:
+                # Portal version 2 appends the platform data (with the
+                # activation token) to the parameters.
+                parameters = params.unpack()[2]
+                platform_data = parameters[-1] if parameters and isinstance(parameters[-1], dict) else {}
+                show_download(download_paths[notification_id], platform_data)
+                return
+            send_message({"event": "notification-clicked", "id": notification_id})
 
         bus.signal_subscribe(PORTAL_NAME, NOTIFICATION_IFACE, "ActionInvoked", PORTAL_PATH,
                              None, Gio.DBusSignalFlags.NONE, on_action)
@@ -668,11 +687,11 @@ def notify(msg):
         "priority": GLib.Variant("s", "normal"),
         # GNOME activates this action with the notification's ID (see "D-Bus
         # activation"), starting Twine first if it isn't running.
-        "default-action": GLib.Variant("s", "app.open-chat"),
-        "default-action-target": GLib.Variant("s", str(msg["id"])),
+        "default-action": GLib.Variant("s", "app." + msg.get("action", "open-chat")),
+        "default-action-target": GLib.Variant("s", str(msg.get("target", msg["id"]))),
     }
     if notification_portal_version >= 2:
-        notification["category"] = GLib.Variant("s", "im.received")
+        notification["category"] = GLib.Variant("s", msg.get("category", "im.received"))
     # The notification's picture, or else Twine's app icon (by its icon name,
     # as installed by Flatpak): GNOME doesn't fill in the app icon itself.
     icon = Gio.ThemedIcon.new(APP_ID).serialize()
@@ -702,6 +721,61 @@ def notify(msg):
             add(False)  # The portal may refuse some images; show it without.
         except GLib.Error as e2:
             print(f"twine-settings-host: notification failed: {e2}", file=sys.stderr)
+
+
+# ---------------------------------------------------------------------------
+# Downloads. Chromium's download bubble belongs to its toolbar, which Twine's
+# window doesn't have, so it appeared partly off screen in the window's
+# top-left corner. The bootstrap worker turns Chromium's download UI off and
+# reports finished downloads here instead: a "Download complete" notification
+# names the file, and clicking it opens its folder through the OpenURI portal
+# (with the file selected, where the file manager supports it).
+# ---------------------------------------------------------------------------
+download_paths = {}  # notification ID -> file path
+last_shown_download = (None, 0.0)  # Some portals report a click twice.
+
+
+def notify_download(msg):
+    path = str(msg.get("path") or "")
+    if not path:
+        return
+    notification_id = str(msg["id"])
+    download_paths[notification_id] = path
+    notify({
+        "id": notification_id,
+        "title": "Download complete",
+        "body": os.path.basename(path),
+        "action": "show-download",
+        "target": path,
+        "category": "transfer.complete",
+    })
+
+
+def show_download(path, platform_data=None):
+    global last_shown_download
+    if not path or not os.path.exists(path):
+        return
+    if last_shown_download[0] == path and time.monotonic() - last_shown_download[1] < 2:
+        return
+    last_shown_download = (path, time.monotonic())
+    platform_data = platform_data or {}
+    token = platform_data.get("activation-token") or platform_data.get("desktop-startup-id")
+    try:
+        from gi.repository import Gio, GLib
+        bus = Gio.bus_get_sync(Gio.BusType.SESSION)
+        # A plain read-only descriptor: the portal refuses O_PATH ones here.
+        fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC)
+        try:
+            fds = Gio.UnixFDList.new_from_array([fd])
+        except Exception:
+            os.close(fd)
+            raise
+        bus.call_with_unix_fd_list_sync(
+            PORTAL_NAME, PORTAL_PATH, "org.freedesktop.portal.OpenURI", "OpenDirectory",
+            GLib.Variant("(sha{sv})", ("", 0, {"activation_token": GLib.Variant("s", token)} if token else {})), None,
+            Gio.DBusCallFlags.NONE, 5000, fds, None)
+    except Exception as e:
+        print(f"twine-settings-host: can't show download: {e}", file=sys.stderr)
 
 
 def withdraw_notification(notification_id):
@@ -785,6 +859,8 @@ def main():
             show_dialog(msg.get("dialog"), msg.get("style"))
         elif msg.get("command") == "notify" and msg.get("id"):
             notify(msg)
+        elif msg.get("command") == "notify-download" and msg.get("id"):
+            notify_download(msg)
         elif msg.get("command") == "withdraw-notification" and msg.get("id"):
             withdraw_notification(msg["id"])
     if monitor is not None:

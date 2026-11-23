@@ -641,6 +641,25 @@ async function notificationClicked(id) {
   if (tab) chrome.tabs.sendMessage(tab.id, `twine:notification-clicked:${id}`).catch(() => {});
 }
 
+// ---------------------------------------------------------------------------
+// Downloads. Chromium's download bubble belongs to its toolbar, which Twine's
+// window doesn't have, so it appeared partly off screen in the window's
+// top-left corner. Turn Chromium's download UI off (this needs the
+// downloads.ui permission, which the build adds) and have twine-settings-host
+// say when a download has finished, with a GNOME notification that opens the
+// file's folder.
+// ---------------------------------------------------------------------------
+chrome.downloads.setUiOptions({ enabled: false }).catch((e) =>
+  console.error("Twine: can't turn off Chromium's download UI", e),
+);
+
+chrome.downloads.onChanged.addListener(async (delta) => {
+  if (delta.state?.current !== "complete") return;
+  const [item] = await chrome.downloads.search({ id: delta.id });
+  if (!item?.filename) return;
+  settingsPort?.postMessage({ command: "notify-download", id: `twine-download-${item.id}`, path: item.filename });
+});
+
 setUpMenu();
 connectSettings();
 
