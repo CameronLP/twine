@@ -187,6 +187,7 @@ min_size_changed = threading.Event()
 # splash URL, then the --class the launcher passes. LINE's popup windows get
 # the same class (see choose_main_window).
 main_window = None  # The main window's X11 ID, once found.
+main_window_found = threading.Event()
 MAIN_WINDOW_CLASS = ("app_share_twine_splash.html",
                      os.environ.get("FLATPAK_ID", "io.github.twinechat.Twine"))
 P_MIN_SIZE = 1 << 4
@@ -227,6 +228,9 @@ def enforce_min_window_size():
     x.XGetWMNormalHints.argtypes = [c_void_p, c_ulong, POINTER(XSizeHints), POINTER(c_long)]
     x.XSetWMNormalHints.argtypes = [c_void_p, c_ulong, POINTER(XSizeHints)]
     x.XFlush.argtypes = [c_void_p]
+    x.XQueryTree.argtypes = [
+        c_void_p, c_ulong, POINTER(c_ulong), POINTER(c_ulong),
+        POINTER(POINTER(c_ulong)), POINTER(ctypes.c_uint)]
 
     # Xlib's default error handler exits the process, and a window can close
     # between listing it and reading it. Ignore such errors instead.
@@ -274,14 +278,41 @@ def enforce_min_window_size():
 
     net_wm_name = x.XInternAtom(display, b"_NET_WM_NAME", 0)
 
+    def is_titled_twine(window):
+        return b"Twine" in (get_property(window, net_wm_name, any_type) or b"")
+
+    def hidden_main_window():
+        """The main window while "Run in Background" has it hidden. Withdrawn
+        windows aren't in _NET_CLIENT_LIST, so a helper started after the
+        window was hidden (the bootstrap worker restarts when idle, and starts
+        a new helper with it) has to look among the root window's children."""
+        root_return, parent_return = c_ulong(), c_ulong()
+        children, count = POINTER(c_ulong)(), ctypes.c_uint()
+        if not x.XQueryTree(display, root, byref(root_return), byref(parent_return),
+                            byref(children), byref(count)):
+            return None
+        try:
+            windows = children[:count.value]
+        finally:
+            if children:
+                x.XFree(children)
+        for window in windows:
+            if is_twine_window(window) and is_titled_twine(window):
+                return window
+        return None
+
     def choose_main_window(candidates):
         """LINE's popup windows (photo viewer, popped-out chats) have the same
         class and role as the main window. The main window is the one titled
-        "Twine" (twine-title.js); otherwise the oldest (lowest ID). At start,
-        it's the only window, so it's found before any popup opens."""
+        "Twine" (twine-title.js), shown or hidden; otherwise the oldest (lowest
+        ID). At start, it's the only window, so it's found before any popup
+        opens."""
         for window in candidates:
-            if b"Twine" in (get_property(window, net_wm_name, any_type) or b""):
+            if is_titled_twine(window):
                 return window
+        hidden = hidden_main_window()
+        if hidden is not None:
+            return hidden
         return min(candidates) if candidates else None
 
     while True:
@@ -297,6 +328,7 @@ def enforce_min_window_size():
             chosen = choose_main_window(candidates)
             if chosen is not None:
                 main_window = chosen
+                main_window_found.set()
                 update(canHide=True)
                 if state["background"] or state["autostart"]:
                     threading.Thread(target=request_background, daemon=True).start()
@@ -344,6 +376,8 @@ command_display = None  # The main thread's X11 connection, for hide/show.
 
 def set_window_visible(visible):
     global command_display
+    # A helper that has just started may not have found the window yet.
+    main_window_found.wait(3)
     if main_window is None:
         return
     import ctypes

@@ -54,7 +54,7 @@ async function focusMainWindow() {
   if (id !== null) {
     try {
       await chrome.windows.get(id); // Throws if the window is gone.
-      if (windowHidden) await showMainWindow();
+      if (await isWindowHidden()) await showMainWindow();
       await chrome.windows.update(id, { focused: true });
       return;
     } catch {
@@ -547,7 +547,13 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 // GNOME's background permission is denied, closing quits as before.
 // ---------------------------------------------------------------------------
 let quitting = false;
-let windowHidden = false;
+
+// Whether the main window is hidden lives in chrome.storage.session
+// (twineHidden), not in a variable: Chromium stops this worker when it's idle
+// and starts it again on demand, which would reset a variable while the window
+// stays hidden, and reopening Twine would then focus a window that isn't shown.
+const isWindowHidden = async () =>
+  Boolean((await chrome.storage.session.get("twineHidden")).twineHidden);
 
 const runInBackground = () =>
   Boolean(appearance.background && appearance.canHide && appearance.backgroundAllowed !== false);
@@ -587,15 +593,13 @@ async function startHiddenIfAsked() {
 // twineHidden in chrome.storage.session tells LINE's page (twine-notifications.js)
 // that its window is hidden: Chromium doesn't notice, so the page still thinks
 // it has focus.
-function hideMainWindow() {
-  windowHidden = true;
-  chrome.storage.session.set({ twineHidden: true });
+async function hideMainWindow() {
+  await chrome.storage.session.set({ twineHidden: true });
   settingsPort?.postMessage({ command: "hide" });
 }
 
 async function showMainWindow() {
-  windowHidden = false;
-  chrome.storage.session.set({ twineHidden: false });
+  await chrome.storage.session.set({ twineHidden: false });
   settingsPort?.postMessage({ command: "show" });
   // Give the window manager a moment to map the window before focusing it.
   await new Promise((resolve) => setTimeout(resolve, 150));
@@ -606,7 +610,7 @@ async function showMainWindow() {
 // normally.
 async function quit() {
   quitting = true;
-  if (windowHidden) await showMainWindow();
+  if (await isWindowHidden()) await showMainWindow();
   const windows = await chrome.windows.getAll({ windowTypes: ["normal", "popup", "app"] });
   await Promise.all(windows.map((w) => chrome.windows.remove(w.id).catch(() => {})));
 }
