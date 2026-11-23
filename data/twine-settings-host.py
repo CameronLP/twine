@@ -515,11 +515,91 @@ def save_appearance(value):
     update(appearance=value)
 
 
+def complete_startup(platform_data):
+    """End the startup notification GNOME began when it asked Twine to open.
+    GNOME shows a busy cursor until the app reports that it has started, or
+    until a timeout of several seconds. Twine doesn't open a new window for
+    these requests (it shows or focuses its existing one), so nothing would
+    report it. The ID is put on the main window (_NET_STARTUP_ID, which also
+    tells the window manager the request was the user's, for focus), and the
+    X11 "remove" startup message is sent for it."""
+    startup_id = platform_data.get("desktop-startup-id") or platform_data.get("activation-token")
+    if not startup_id:
+        return
+    try:
+        send_startup_complete(startup_id)
+    except Exception as e:
+        # Never let this keep the D-Bus call from being answered.
+        print(f"twine-settings-host: can't complete startup: {e}", file=sys.stderr)
+
+
+def send_startup_complete(startup_id):
+    import ctypes
+    from ctypes import Structure, byref, c_char, c_char_p, c_int, c_long, c_uint, c_ulong, c_void_p
+    try:
+        x = ctypes.CDLL("libX11.so.6")
+    except OSError:
+        return
+    x.XOpenDisplay.restype = c_void_p
+    x.XOpenDisplay.argtypes = [c_char_p]
+    x.XCloseDisplay.argtypes = [c_void_p]
+    x.XDefaultRootWindow.restype = c_ulong
+    x.XDefaultRootWindow.argtypes = [c_void_p]
+    x.XInternAtom.restype = c_ulong
+    x.XInternAtom.argtypes = [c_void_p, c_char_p, c_int]
+    x.XChangeProperty.argtypes = [c_void_p, c_ulong, c_ulong, c_ulong, c_int, c_int, c_char_p, c_int]
+    x.XCreateSimpleWindow.restype = c_ulong
+    x.XCreateSimpleWindow.argtypes = [c_void_p, c_ulong, c_int, c_int, c_uint, c_uint, c_uint, c_ulong, c_ulong]
+    x.XDestroyWindow.argtypes = [c_void_p, c_ulong]
+    x.XSendEvent.argtypes = [c_void_p, c_ulong, c_int, c_long, c_void_p]
+    x.XSync.argtypes = [c_void_p, c_int]
+
+    class XClientMessageEvent(Structure):
+        _fields_ = [("type", c_int), ("serial", c_ulong), ("send_event", c_int),
+                    ("display", c_void_p), ("window", c_ulong), ("message_type", c_ulong),
+                    ("format", c_int),
+                    # A union with long[5] in Xlib, so it's aligned like a long.
+                    ("data", c_long * 5),
+                    ("pad", c_char * 96)]  # XSendEvent reads a whole XEvent (192 bytes).
+
+    display = x.XOpenDisplay(None)
+    if not display:
+        return
+    try:
+        root = x.XDefaultRootWindow(display)
+        encoded = startup_id.encode()
+        if main_window is not None:
+            x.XChangeProperty(display, main_window, x.XInternAtom(display, b"_NET_STARTUP_ID", 0),
+                              x.XInternAtom(display, b"UTF8_STRING", 0), 8, 0,
+                              encoded, len(encoded))
+        # The startup-notification protocol: the message travels in 20-byte
+        # pieces, the first as _NET_STARTUP_INFO_BEGIN, from a window of ours.
+        quoted = encoded.replace(b"\\", b"\\\\").replace(b'"', b'\\"')
+        message = b'remove: ID="' + quoted + b'"\0'
+        sender = x.XCreateSimpleWindow(display, root, -100, -100, 1, 1, 0, 0, 0)
+        begin = x.XInternAtom(display, b"_NET_STARTUP_INFO_BEGIN", 0)
+        more = x.XInternAtom(display, b"_NET_STARTUP_INFO", 0)
+        property_change_mask = 1 << 22
+        for offset in range(0, len(message), 20):
+            event = XClientMessageEvent(type=33, send_event=1, display=display, window=sender,
+                                        message_type=begin if offset == 0 else more, format=8)
+            piece = message[offset:offset + 20]
+            ctypes.memmove(byref(event, XClientMessageEvent.data.offset), piece, len(piece))
+            x.XSendEvent(display, root, 0, property_change_mask, byref(event))
+        x.XSync(display, 0)
+        x.XDestroyWindow(display, sender)
+        x.XSync(display, 0)
+    finally:
+        x.XCloseDisplay(display)
+
+
 def on_application_call(connection, sender, path, interface, method, params, invocation):
     if method in ("Activate", "Open"):
         send_message({"event": "activate"})
+        complete_startup(params.unpack()[-1])
     elif method == "ActivateAction":
-        action, parameter, _platform_data = params.unpack()
+        action, parameter, platform_data = params.unpack()
+        complete_startup(platform_data)
         if action == "open-chat":
             # The notification's ID, from its default-action-target.
             notification_id = parameter[0] if parameter else ""
